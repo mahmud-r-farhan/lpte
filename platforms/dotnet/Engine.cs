@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
 
@@ -7,13 +8,16 @@ namespace Lpte
 {
     /// <summary>
     /// LPTE — Local Profanity & Toxicity Engine for .NET.
-    /// Communicates with the Python LPTE engine via subprocess IPC.
+    /// Communicates with the Python engine via JSON IPC over stdin/stdout.
+    /// User input is NEVER interpolated into Python code.
     /// </summary>
     public class Engine : IDisposable
     {
         private readonly string _languageCode;
         private readonly double _threshold;
         private readonly string _pythonPath;
+        private Process _process;
+        private StreamWriter _stdin;
         private bool _disposed;
 
         public Engine(string languageCode = "en", double threshold = 0.6, string pythonPath = "python3")
@@ -21,6 +25,29 @@ namespace Lpte
             _languageCode = languageCode;
             _threshold = threshold;
             _pythonPath = pythonPath;
+            StartProcess();
+        }
+
+        private void StartProcess()
+        {
+            var bridgeScript = GetBridgeScript();
+
+            _process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = _pythonPath,
+                    Arguments = $"-u -c \"{bridgeScript}\"",
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+
+            _process.Start();
+            _stdin = _process.StandardInput;
         }
 
         /// <summary>
@@ -29,26 +56,19 @@ namespace Lpte
         public async Task<ClassificationResult> AnalyzeAsync(string text, double? threshold = null)
         {
             var t = threshold ?? _threshold;
-            var script = $@"
-import sys, json
-sys.path.insert(0, '.')
-from lpte import LpteEngine
-from lpte.languages import EnglishProfile, BengaliProfile
+            var request = JsonSerializer.Serialize(new
+            {
+                command = "analyze",
+                text,
+                language_code = _languageCode,
+                threshold = t
+            });
 
-profiles = {{'en': EnglishProfile, 'bn': BengaliProfile}}
-profile = profiles.get('{_languageCode}', EnglishProfile)
-engine = LpteEngine(profile)
+            await _stdin.WriteLineAsync(request);
+            await _stdin.FlushAsync();
 
-result = engine.analyze("""{text.Replace("\"", "\\\"")}""", {t})
-print(json.dumps({{
-    'is_toxic': result.is_toxic,
-    'severity': result.severity.value,
-    'confidence': result.confidence,
-    'matched_terms': result.matched_terms
-}}))";
-
-            var output = await RunPython(script);
-            var raw = JsonSerializer.Deserialize<RawResult>(output);
+            var responseLine = await _process.StandardOutput.ReadLineAsync();
+            var raw = JsonSerializer.Deserialize<RawResult>(responseLine);
 
             return new ClassificationResult
             {
@@ -84,47 +104,54 @@ print(json.dumps({{
             return IsToxicAsync(text, threshold).GetAwaiter().GetResult();
         }
 
-        private async Task<string> RunPython(string script)
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = _pythonPath,
-                Arguments = $"-c \"{script.Replace("\"", "\\\"")}\"",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            using var process = Process.Start(psi);
-            var output = await process.StandardOutput.ReadToEndAsync();
-            await process.WaitForExitAsync();
-
-            if (process.ExitCode != 0)
-            {
-                var error = await process.StandardError.ReadToEndAsync();
-                throw new LpteException($"Python error: {error}");
-            }
-
-            return output;
-        }
-
         public void Dispose()
         {
             if (!_disposed)
             {
+                _stdin?.Close();
+                if (!_process.HasExited)
+                {
+                    _process.Kill();
+                }
+                _process?.Dispose();
                 _disposed = true;
             }
+        }
+
+        private static string GetBridgeScript()
+        {
+            return @"import sys, json
+from lpte.core.engine import LpteEngine
+engines = {}
+def get_engine(lang):
+    if lang not in engines:
+        if lang == 'bn':
+            from lpte.languages.bn import BengaliProfile
+            engines[lang] = LpteEngine(BengaliProfile)
+        else:
+            from lpte.languages.en import EnglishProfile
+            engines[lang] = LpteEngine(EnglishProfile)
+    return engines[lang]
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    try:
+        req = json.loads(line)
+        engine = get_engine(req.get('language_code', 'en'))
+        cmd = req.get('command', 'analyze')
+        if cmd == 'analyze':
+            r = engine.analyze(req['text'], req.get('threshold', 0.6))
+            print(json.dumps({'is_toxic': r.is_toxic, 'severity': r.severity.value, 'confidence': r.confidence, 'matched_terms': r.matched_terms}))
+        else:
+            print(json.dumps({'error': 'unknown command'}))
+    except Exception as e:
+        print(json.dumps({'error': str(e)}))";
         }
     }
 
     public enum Severity
     {
-        None = 0,
-        Low = 1,
-        Medium = 2,
-        High = 3,
-        Critical = 4
+        None = 0, Low = 1, Medium = 2, High = 3, Critical = 4
     }
 
     public class ClassificationResult
@@ -136,11 +163,6 @@ print(json.dumps({{
 
         public override string ToString() =>
             $"Toxic={IsToxic}, Severity={Severity}, Confidence={Confidence:F2}";
-    }
-
-    public class LpteException : Exception
-    {
-        public LpteException(string message) : base(message) { }
     }
 
     internal class RawResult

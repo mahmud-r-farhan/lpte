@@ -18,8 +18,8 @@ def main():
     english_texts = [
         "Hello, how are you today?",
         "The weather is beautiful",
-        "you are a f***ing idiot",
-        "this is some bullsh1t",
+        "f4ck this bullsh1t",
+        "you are a bastard",
         "class assessment was great",
     ]
 

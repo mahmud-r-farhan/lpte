@@ -1,8 +1,8 @@
 """Tests for JSON language pack loader."""
 
 import json
+import os
 import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -50,13 +50,15 @@ class TestLanguagePackLoader:
             "language_name": "Test",
             "bad_words": ["word1"],
         }
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump(data, f)
-            f.flush()
-            profile = LanguagePackLoader.load_file(f.name)
-
-        assert profile.language_code == "test"
-        assert "word1" in profile.bad_words
+        fd, path = tempfile.mkstemp(suffix=".json")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f)
+            profile = LanguagePackLoader.load_file(path)
+            assert profile.language_code == "test"
+            assert "word1" in profile.bad_words
+        finally:
+            os.unlink(path)
 
     def test_stemmer_from_suffix_rules(self):
         data = {

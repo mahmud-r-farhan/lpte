@@ -110,38 +110,38 @@ if (result.isToxic) {
 
 ```
 lpte/
-├── lpte/
+├── lpte/                      # Python package
 │   ├── core/
-│   │   ├── normalizer.py    # Unicode normalization, leet reversal, zero-width stripping
-│   │   ├── tokenizer.py     # Word splitting, n-gram generation
-│   │   ├── classifier.py    # Multi-signal scoring (exact, stemmed, ngram, fragment)
-│   │   ├── stemmer.py       # Abstract stemmer interface
-│   │   ├── profile.py       # Language profile dataclass
-│   │   ├── loader.py        # JSON-based dynamic language loading
-│   │   └── engine.py        # High-level API
+│   │   ├── normalizer.py      # Unicode normalization, leet reversal, zero-width stripping
+│   │   ├── tokenizer.py       # Word splitting, n-gram generation
+│   │   ├── classifier.py      # Multi-signal scoring (exact, stemmed, concat, fuzzy)
+│   │   ├── stemmer.py         # Abstract stemmer interface
+│   │   ├── profile.py         # Language profile dataclass
+│   │   ├── loader.py          # JSON-based dynamic language loading
+│   │   └── engine.py          # High-level API
 │   └── languages/
-│       ├── bn.py            # Bengali language pack
-│       └── en.py            # English language pack
+│       ├── bn.py              # Bengali language pack (stemmer + profile)
+│       └── en.py              # English language pack (stemmer + profile)
 │
-├── languages/
-│   ├── bn_profile.json      # Bengali JSON language pack
-│   ├── en_profile.json      # English JSON language pack
-│   ├── es_profile.json      # Spanish example pack
-│   └── hi_profile.json      # Hindi example pack
+├── languages/                 # JSON language packs (drop-in)
+│   ├── bn_profile.json        # Bengali
+│   ├── en_profile.json        # English
+│   ├── es_profile.json        # Spanish (example)
+│   └── hi_profile.json        # Hindi (example)
 │
-├── platforms/
-│   ├── flutter/             # Flutter plugin (Dart)
-│   ├── android/             # Android wrapper (Kotlin)
-│   ├── ios/                 # iOS wrapper (Swift) + React Native bridge
-│   ├── react-native/        # React Native plugin (TypeScript)
-│   ├── nodejs/              # Node.js module (TypeScript)
-│   ├── go/                  # Go bindings
-│   ├── rust/                # Rust bindings
-│   ├── dotnet/              # .NET/C# wrapper
-│   └── php/                 # PHP wrapper
+├── platforms/                 # Cross-platform wrappers
+│   ├── flutter/               # Flutter plugin (Dart)
+│   ├── android/               # Android wrapper (Kotlin)
+│   ├── ios/                   # iOS + React Native bridge (Swift)
+│   ├── react-native/          # React Native plugin (TypeScript)
+│   ├── nodejs/                # Node.js module (TypeScript)
+│   ├── go/                    # Go bindings
+│   ├── rust/                  # Rust bindings
+│   ├── dotnet/                # .NET/C# wrapper
+│   └── php/                   # PHP wrapper
 │
-├── tests/                   # 78 test cases
-└── example/                 # Demo application
+├── tests/                     # 78 test cases
+└── example/                   # Demo application
 ```
 
 ## How It Works
@@ -240,7 +240,7 @@ pytest tests/test_bypass_tricks.py -v
 ```
 
 The test suite covers:
-- **40+ test cases** across all modules
+- **78 test cases** across all modules
 - Bypass trick detection (leetspeak, zero-width, word splitting, etc.)
 - False positive prevention (clean words containing profanity substrings)
 - Bengali stemmer validation

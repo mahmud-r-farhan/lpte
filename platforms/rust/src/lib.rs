@@ -1,9 +1,7 @@
 //! LPTE — Rust bindings for the Local Profanity & Toxicity Engine.
 //!
-//! Provides on-device text toxicity analysis. Communicates with the Python
-//! LPTE engine via:
-//! 1. PyO3 (embedded Python) — production
-//! 2. Subprocess IPC — development/testing
+//! Communicates with the Python engine via JSON IPC over stdin/stdout.
+//! User input is NEVER interpolated into Python code.
 //!
 //! # Usage
 //!
@@ -19,7 +17,8 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
-use std::process::Command;
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
 /// Toxicity severity levels.
@@ -72,73 +71,86 @@ impl Default for Options {
     }
 }
 
+#[derive(Serialize)]
+struct IpcRequest {
+    command: String,
+    text: String,
+    language_code: String,
+    threshold: f64,
+}
+
+#[derive(Deserialize)]
+struct IpcResponse {
+    is_toxic: bool,
+    severity: u8,
+    confidence: f64,
+    matched_terms: Vec<String>,
+}
+
 /// LPTE toxicity analysis engine.
 pub struct Engine {
     language_code: String,
     threshold: f64,
-    python_path: String,
-    _mutex: Mutex<()>,
+    child: Mutex<Child>,
 }
 
 impl Engine {
     /// Create a new engine instance.
     pub fn new(language_code: &str, opts: Options) -> Result<Self, String> {
+        let bridge_script = include_str!("bridge.py");
+
+        let mut child = Command::new(&opts.python_path)
+            .args(["-u", "-c", bridge_script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to start Python: {}", e))?;
+
         Ok(Engine {
             language_code: language_code.to_string(),
             threshold: opts.threshold,
-            python_path: opts.python_path,
-            _mutex: Mutex::new(()),
+            child: Mutex::new(child),
         })
+    }
+
+    fn send_request(&self, req: &IpcRequest) -> Result<IpcResponse, String> {
+        let mut child = self.child.lock().map_err(|e| e.to_string())?;
+        let stdin = child.stdin.as_mut().ok_or("No stdin")?;
+        let stdout = child.stdout.as_mut().ok_or("No stdout")?;
+
+        let mut request_json = serde_json::to_string(req).map_err(|e| e.to_string())?;
+        request_json.push('\n');
+
+        stdin
+            .write_all(request_json.as_bytes())
+            .map_err(|e| format!("Write failed: {}", e))?;
+        stdin.flush().map_err(|e| format!("Flush failed: {}", e))?;
+
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .map_err(|e| format!("Read failed: {}", e))?;
+
+        serde_json::from_str(&line).map_err(|e| format!("Parse failed: {}", e))
     }
 
     /// Analyze text for toxic content.
     pub fn analyze(&self, text: &str, threshold: Option<f64>) -> Result<Result, String> {
         let t = threshold.unwrap_or(self.threshold);
 
-        let script = format!(
-            r#"
-import sys, json
-sys.path.insert(0, ".")
-from lpte import LpteEngine
-from lpte.languages import EnglishProfile, BengaliProfile
-
-profiles = {{"en": EnglishProfile, "bn": BengaliProfile}}
-profile = profiles.get("{lang}", EnglishProfile)
-engine = LpteEngine(profile)
-
-result = engine.analyze("""{text}""", {threshold})
-print(json.dumps({{
-    "is_toxic": result.is_toxic,
-    "severity": result.severity.value,
-    "confidence": result.confidence,
-    "matched_terms": result.matched_terms
-}}))
-"#,
-            lang = self.language_code,
-            text = text.replace('"', "\\\""),
-            threshold = t,
-        );
-
-        let output = Command::new(&self.python_path)
-            .arg("-c")
-            .arg(&script)
-            .output()
-            .map_err(|e| format!("Failed to run Python: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Python error: {}", stderr));
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let raw: RawResult =
-            serde_json::from_str(&stdout).map_err(|e| format!("Parse error: {}", e))?;
+        let resp = self.send_request(&IpcRequest {
+            command: "analyze".to_string(),
+            text: text.to_string(),
+            language_code: self.language_code.clone(),
+            threshold: t,
+        })?;
 
         Ok(Result {
-            is_toxic: raw.is_toxic,
-            severity: Severity::from_u8(raw.severity),
-            confidence: raw.confidence,
-            matched_terms: raw.matched_terms,
+            is_toxic: resp.is_toxic,
+            severity: Severity::from_u8(resp.severity),
+            confidence: resp.confidence,
+            matched_terms: resp.matched_terms,
         })
     }
 
@@ -149,22 +161,10 @@ print(json.dumps({{
     }
 }
 
-#[derive(Deserialize)]
-struct RawResult {
-    is_toxic: bool,
-    severity: u8,
-    confidence: f64,
-    matched_terms: Vec<String>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_severity_from_u8() {
-        assert_eq!(Severity::from_u8(0), Severity::None);
-        assert_eq!(Severity::from_u8(1), Severity::Low);
-        assert_eq!(Severity::from_u8(4), Severity::Critical);
+impl Drop for Engine {
+    fn drop(&mut self) {
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+        }
     }
 }

@@ -12,7 +12,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  lpte: ^1.0.0
 
 dev_dependencies:
   flutter_test:

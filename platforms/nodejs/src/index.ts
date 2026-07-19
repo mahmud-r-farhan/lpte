@@ -35,6 +35,39 @@ export interface LpteOptions {
 // Path to the Python LPTE package
 const LPTE_PYTHON_DIR = join(__dirname, '..', '..', '..');
 
+// Python bridge script — runs as a persistent subprocess
+const BRIDGE_SCRIPT = `
+import sys, json
+from lpte.core.engine import LpteEngine
+engines = {}
+def get_engine(lang):
+    if lang not in engines:
+        if lang == "bn":
+            from lpte.languages.bn import BengaliProfile
+            engines[lang] = LpteEngine(BengaliProfile)
+        else:
+            from lpte.languages.en import EnglishProfile
+            engines[lang] = LpteEngine(EnglishProfile)
+    return engines[lang]
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    try:
+        req = json.loads(line)
+        engine = get_engine(req.get("language_code", "en"))
+        cmd = req.get("command", "analyze")
+        if cmd == "analyze":
+            r = engine.analyze(req["text"], req.get("threshold", 0.6))
+            print(json.dumps({"is_toxic": r.is_toxic, "severity": r.severity.name, "confidence": r.confidence, "matched_terms": r.matched_terms}))
+        elif cmd == "sanitize":
+            s = engine.sanitize(req["text"], req.get("mask", "*"))
+            print(json.dumps({"sanitized": s}))
+        else:
+            print(json.dumps({"error": "unknown command"}))
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
+`;
+
 let engineProcess: ChildProcess | null = null;
 
 /**
@@ -47,11 +80,11 @@ function getEngine(options: LpteOptions = {}): ChildProcess {
 
   const pythonPath = options.pythonPath || 'python3';
 
-  engineProcess = spawn(pythonPath, ['-m', 'lpte._node_bridge'], {
+  engineProcess = spawn(pythonPath, ['-u', '-c', BRIDGE_SCRIPT], {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
-      LPTE_PATH: LPTE_PYTHON_DIR,
+      PYTHONPATH: LPTE_PYTHON_DIR,
     },
   });
 

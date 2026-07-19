@@ -26,7 +26,13 @@ ENV/
 htmlcov/
 .mypy_cache/
 
+# Node.js
+node_modules/
+
 # OS
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local tooling
+.mimocode/

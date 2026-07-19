@@ -6,13 +6,22 @@ Thank you for your interest in contributing to the Local Profanity & Toxicity En
 
 ### Adding a New Language Pack
 
-The easiest way to contribute. Create a JSON language file:
+The easiest way to contribute. Two options:
+
+**Option 1: JSON file (no code required)**
 
 1. Fork the repository
-2. Create `languages/<code>/src/main/resources/<code>_profile.json`
-3. Add a `LanguageProfile` implementation in Kotlin
-4. Add tests for your language
+2. Create `languages/<code>_profile.json`
+3. Include `bad_words`, `suffix_rules`, and optional `context_rules`
+4. Test with the example module
 5. Submit a PR
+
+**Option 2: Python implementation (full control)**
+
+1. Create `lpte/languages/<code>.py`
+2. Implement a `Stemmer` subclass and `LanguageProfile`
+3. Add tests in `tests/test_<code>_stemmer.py`
+4. Submit a PR
 
 ### Improving Stemmers
 
@@ -24,17 +33,17 @@ If you're a native speaker of a supported language, your expertise is invaluable
 ### Bypass Detection
 
 Help us catch new evasion techniques:
-- Add test cases in `BypassTrickTest.kt`
+- Add test cases in `tests/test_bypass_tricks.py`
 - Document the bypass pattern
 - Propose detection strategies
 
 ### Platform Wrappers
 
 We need help with:
-- iOS native implementation (Swift/Objective-C)
-- React Native bridge
-- Kotlin Multiplatform expansion
+- Native iOS (Swift, no React Native dependency)
+- Kotlin Multiplatform
 - WebAssembly target
+- Ruby, Java, C++ bindings
 
 ## Development Setup
 
@@ -43,19 +52,19 @@ We need help with:
 git clone https://github.com/lpte/lpte.git
 cd lpte
 
-# Build
-./gradlew build
+# Install in dev mode
+pip install -e ".[dev]"
 
-# Test
-./gradlew test
+# Run tests
+pytest
 
 # Run example
-./gradlew :example:run
+python example/main.py
 ```
 
 ## Code Style
 
-- Kotlin code follows the official Kotlin coding conventions
+- Python code follows PEP 8 (enforced by ruff)
 - No comments unless the "why" is non-obvious
 - Tests must cover both positive and negative cases
 - All new features must include tests
@@ -65,7 +74,7 @@ cd lpte
 1. Create a feature branch from `main`
 2. Write tests first (TDD encouraged)
 3. Implement the feature
-4. Ensure all tests pass
+4. Ensure all tests pass (`pytest`)
 5. Update README if adding user-facing features
 6. Submit PR with clear description
 

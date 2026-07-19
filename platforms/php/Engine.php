@@ -2,10 +2,11 @@
 /**
  * LPTE — PHP wrapper for the Local Profanity & Toxicity Engine.
  *
- * Communicates with the Python LPTE engine via proc_open() subprocess IPC.
+ * Communicates with the Python engine via JSON IPC over proc_open().
+ * User input is NEVER interpolated into Python code.
  *
  * Usage:
- *   $engine = new LpteEngine('en');
+ *   $engine = new \Lpte\Engine('en');
  *   $result = $engine->analyze('some text');
  *   if ($result['is_toxic']) {
  *       echo "Toxic: {$result['severity']}\n";
@@ -19,47 +20,61 @@ class Engine
     private string $languageCode;
     private float $threshold;
     private string $pythonPath;
+    private $process;
+    private $pipes;
 
     public function __construct(string $languageCode = 'en', float $threshold = 0.6, string $pythonPath = 'python3')
     {
         $this->languageCode = $languageCode;
         $this->threshold = $threshold;
         $this->pythonPath = $pythonPath;
+        $this->startProcess();
+    }
+
+    private function startProcess(): void
+    {
+        $bridgeScript = $this->getBridgeScript();
+
+        $descriptors = [
+            0 => ['pipe', 'r'],  // stdin
+            1 => ['pipe', 'w'],  // stdout
+            2 => ['pipe', 'w'],  // stderr
+        ];
+
+        $this->process = proc_open(
+            "{$this->pythonPath} -u -c " . escapeshellarg($bridgeScript),
+            $descriptors,
+            $this->pipes
+        );
+
+        if (!is_resource($this->process)) {
+            throw new \RuntimeException('Failed to start Python engine');
+        }
     }
 
     /**
      * Analyze text for toxic content.
      *
-     * @param string $text Input text
-     * @param float|null $threshold Classification threshold (0.0-1.0)
      * @return array{is_toxic: bool, severity: string, confidence: float, matched_terms: string[]}
      */
     public function analyze(string $text, ?float $threshold = null): array
     {
         $t = $threshold ?? $this->threshold;
-        $escapedText = addslashes($text);
 
-        $script = <<<PYTHON
-import sys, json
-sys.path.insert(0, '.')
-from lpte import LpteEngine
-from lpte.languages import EnglishProfile, BengaliProfile
+        $request = json_encode([
+            'command' => 'analyze',
+            'text' => $text,
+            'language_code' => $this->languageCode,
+            'threshold' => $t,
+        ]);
 
-profiles = {'en': EnglishProfile, 'bn': BengaliProfile}
-profile = profiles.get('{$this->languageCode}', EnglishProfile)
-engine = LpteEngine(profile)
+        fwrite($this->pipes[0], $request . "\n");
+        fflush($this->pipes[0]);
 
-result = engine.analyze("""{$escapedText}""", {$t})
-print(json.dumps({
-    'is_toxic': result.is_toxic,
-    'severity': result.severity.name,
-    'confidence': result.confidence,
-    'matched_terms': result.matched_terms
-}))
-PYTHON;
+        $response = fgets($this->pipes[1]);
+        $result = json_decode(trim($response), true);
 
-        $output = $this->runPython($script);
-        return json_decode($output, true) ?? [
+        return $result ?? [
             'is_toxic' => false,
             'severity' => 'NONE',
             'confidence' => 0.0,
@@ -81,53 +96,74 @@ PYTHON;
      */
     public function sanitize(string $text, string $mask = '*'): string
     {
-        $escapedText = addslashes($text);
-        $escapedMask = addslashes($mask);
+        $request = json_encode([
+            'command' => 'sanitize',
+            'text' => $text,
+            'language_code' => $this->languageCode,
+            'mask' => $mask,
+        ]);
 
-        $script = <<<PYTHON
-import sys, json
-sys.path.insert(0, '.')
-from lpte import LpteEngine
-from lpte.languages import EnglishProfile
+        fwrite($this->pipes[0], $request . "\n");
+        fflush($this->pipes[0]);
 
-engine = LpteEngine(EnglishProfile)
-result = engine.sanitize("""{$escapedText}""", "{$escapedMask}")
-print(json.dumps({'result': result}))
-PYTHON;
+        $response = fgets($this->pipes[1]);
+        $result = json_decode(trim($response), true);
 
-        $output = $this->runPython($script);
-        $decoded = json_decode($output, true);
-        return $decoded['result'] ?? $text;
+        return $result['sanitized'] ?? $text;
     }
 
-    private function runPython(string $script): string
+    public function __destruct()
     {
-        $descriptors = [
-            0 => ['pipe', 'r'],  // stdin
-            1 => ['pipe', 'w'],  // stdout
-            2 => ['pipe', 'w'],  // stderr
-        ];
+        if (is_resource($this->pipes[0])) fclose($this->pipes[0]);
+        if (is_resource($this->pipes[1])) fclose($this->pipes[1]);
+        if (is_resource($this->pipes[2])) fclose($this->pipes[2]);
+        if (is_resource($this->process)) proc_close($this->process);
+    }
 
-        $process = proc_open(
-            "{$this->pythonPath} -c " . escapeshellarg($script),
-            $descriptors,
-            $pipes
-        );
+    private function getBridgeScript(): string
+    {
+        return <<<'PYTHON'
+import sys, json
+from lpte.core.engine import LpteEngine
 
-        if (!is_resource($process)) {
-            throw new \RuntimeException('Failed to start Python process');
-        }
+engines = {}
 
-        fclose($pipes[0]);
-        $output = stream_get_contents($pipes[1]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
+def get_engine(lang_code):
+    if lang_code not in engines:
+        if lang_code == "bn":
+            from lpte.languages.bn import BengaliProfile
+            engines[lang_code] = LpteEngine(BengaliProfile)
+        else:
+            from lpte.languages.en import EnglishProfile
+            engines[lang_code] = LpteEngine(EnglishProfile)
+    return engines[lang_code]
 
-        $exitCode = proc_close($process);
-        if ($exitCode !== 0) {
-            throw new \RuntimeException("Python process failed with exit code {$exitCode}");
-        }
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        req = json.loads(line)
+        engine = get_engine(req.get("language_code", "en"))
+        cmd = req.get("command", "analyze")
 
-        return trim($output);
+        if cmd == "analyze":
+            result = engine.analyze(req["text"], req.get("threshold", 0.6))
+            resp = {
+                "is_toxic": result.is_toxic,
+                "severity": result.severity.name,
+                "confidence": result.confidence,
+                "matched_terms": result.matched_terms,
+            }
+        elif cmd == "sanitize":
+            sanitized = engine.sanitize(req["text"], req.get("mask", "*"))
+            resp = {"sanitized": sanitized}
+        else:
+            resp = {"error": f"unknown command: {cmd}"}
+
+        print(json.dumps(resp), flush=True)
+    except Exception as e:
+        print(json.dumps({"error": str(e)}), flush=True)
+PYTHON;
     }
 }

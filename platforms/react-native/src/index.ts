@@ -6,7 +6,7 @@
  * and returns results via promises.
  */
 
-import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
+import { NativeModules } from 'react-native';
 
 const { LpteModule } = NativeModules;
 

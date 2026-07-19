@@ -1,32 +1,25 @@
 // Package lpte provides Go bindings for the LPTE toxicity engine.
 //
-// The Go wrapper communicates with the Python LPTE engine via:
-// 1. Embedded Python (cgo + Python C API) — production
-// 2. Subprocess IPC — development/testing
+// Communicates with the Python LPTE engine via JSON IPC over stdin/stdout.
+// User input is NEVER interpolated into Python code — all data passes through JSON.
 //
 // Usage:
 //
 //	engine, err := lpte.NewEngine("en")
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
 //	defer engine.Close()
 //
-//	result, err := engine.Analyze("some text", 0.6)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//
+//	result, err := engine.Analyze("some text")
 //	if result.IsToxic {
 //	    fmt.Printf("Toxic: %s (%.2f)\n", result.Severity, result.Confidence)
 //	}
 package lpte
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
-	"strings"
 	"sync"
 )
 
@@ -65,6 +58,9 @@ type Engine struct {
 	languageCode string
 	threshold    float64
 	pythonPath   string
+	cmd          *exec.Cmd
+	stdin        io.WriteCloser
+	scanner      *bufio.Scanner
 	mu           sync.Mutex
 }
 
@@ -79,28 +75,96 @@ func NewEngine(languageCode string, opts ...Options) (*Engine, error) {
 		cfg = opts[0]
 	}
 
+	// Start a persistent Python process for IPC
+	cmd := exec.Command(cfg.PythonPath, "-u", "-c", bridgeScript)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start Python: %w", err)
+	}
+
 	return &Engine{
 		languageCode: cfg.LanguageCode,
 		threshold:    cfg.Threshold,
 		pythonPath:   cfg.PythonPath,
+		cmd:          cmd,
+		stdin:        stdin,
+		scanner:      bufio.NewScanner(stdout),
 	}, nil
+}
+
+type ipcRequest struct {
+	Command      string  `json:"command"`
+	Text         string  `json:"text"`
+	LanguageCode string  `json:"language_code"`
+	Threshold    float64 `json:"threshold"`
+	Mask         string  `json:"mask,omitempty"`
+}
+
+type ipcResponse struct {
+	IsToxic      bool     `json:"is_toxic"`
+	Severity     int      `json:"severity"`
+	Confidence   float64  `json:"confidence"`
+	MatchedTerms []string `json:"matched_terms"`
+	Sanitized    string   `json:"sanitized,omitempty"`
+}
+
+func (e *Engine) sendRequest(req ipcRequest) (*ipcResponse, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	data = append(data, '\n')
+
+	if _, err := e.stdin.Write(data); err != nil {
+		return nil, fmt.Errorf("write to engine: %w", err)
+	}
+
+	if !e.scanner.Scan() {
+		return nil, fmt.Errorf("engine closed: %w", e.scanner.Err())
+	}
+
+	var resp ipcResponse
+	if err := json.Unmarshal(e.scanner.Bytes(), &resp); err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	return &resp, nil
 }
 
 // Analyze analyzes text for toxic content.
 func (e *Engine) Analyze(text string, threshold ...float64) (*Result, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	t := e.threshold
 	if len(threshold) > 0 {
 		t = threshold[0]
 	}
 
-	return e.callPython("analyze", map[string]interface{}{
-		"text":          text,
-		"language_code": e.languageCode,
-		"threshold":     t,
+	resp, err := e.sendRequest(ipcRequest{
+		Command:      "analyze",
+		Text:         text,
+		LanguageCode: e.languageCode,
+		Threshold:    t,
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &Result{
+		IsToxic:      resp.IsToxic,
+		Severity:     Severity(resp.Severity),
+		Confidence:   resp.Confidence,
+		MatchedTerms: resp.MatchedTerms,
+	}, nil
 }
 
 // IsToxic performs a quick toxicity check.
@@ -114,98 +178,76 @@ func (e *Engine) IsToxic(text string, threshold ...float64) (bool, error) {
 
 // Sanitize masks toxic segments in text.
 func (e *Engine) Sanitize(text string, mask ...string) (string, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	m := "*"
 	if len(mask) > 0 {
 		m = mask[0]
 	}
 
-	// Build Python inline script
-	script := fmt.Sprintf(`
-import sys
-sys.path.insert(0, "%s")
-from lpte import LpteEngine
-from lpte.languages import EnglishProfile, BengaliProfile
-
-profiles = {"en": EnglishProfile, "bn": BengaliProfile}
-profile = profiles.get("%s", EnglishProfile)
-engine = LpteEngine(profile)
-
-import json
-print(json.dumps({"result": engine.sanitize("%s", "%s")}))
-`, e.getLptePath(), e.languageCode, strings.ReplaceAll(text, `"`, `\"`), m)
-
-	cmd := exec.Command(e.pythonPath, "-c", script)
-	output, err := cmd.CombinedOutput()
+	resp, err := e.sendRequest(ipcRequest{
+		Command:      "sanitize",
+		Text:         text,
+		LanguageCode: e.languageCode,
+		Mask:         m,
+	})
 	if err != nil {
-		return text, fmt.Errorf("sanitize failed: %w\n%s", err, output)
+		return text, err
 	}
 
-	var resp struct {
-		Result string `json:"result"`
-	}
-	if err := json.Unmarshal(output, &resp); err != nil {
-		return text, fmt.Errorf("parse failed: %w", err)
-	}
-
-	return resp.Result, nil
+	return resp.Sanitized, nil
 }
 
-// Close cleans up resources.
+// Close shuts down the Python engine process.
 func (e *Engine) Close() error {
-	return nil
+	e.stdin.Close()
+	return e.cmd.Process.Kill()
 }
 
-func (e *Engine) callPython(command string, args map[string]interface{}) (*Result, error) {
-	// Build Python inline script
-	text := args["text"].(string)
-	threshold := args["threshold"].(float64)
-
-	script := fmt.Sprintf(`
+// bridgeScript is the persistent Python IPC bridge.
+// All user input arrives via JSON on stdin — NEVER interpolated into code.
+const bridgeScript = `
 import sys, json
-sys.path.insert(0, "%s")
-from lpte import LpteEngine
-from lpte.languages import EnglishProfile, BengaliProfile
+from lpte.core.engine import LpteEngine
+from lpte.core.loader import LanguagePackLoader
 
-profiles = {"en": EnglishProfile, "bn": BengaliProfile}
-profile = profiles.get("%s", EnglishProfile)
-engine = LpteEngine(profile)
+engines = {}
 
-result = engine.analyze("""%s""", %v)
-print(json.dumps({
-    "is_toxic": result.is_toxic,
-    "severity": result.severity.value,
-    "confidence": result.confidence,
-    "matched_terms": result.matched_terms
-}))
-`, e.getLptePath(), e.languageCode, text, threshold)
+def get_engine(lang_code):
+    if lang_code not in engines:
+        if lang_code == "bn":
+            from lpte.languages.bn import BengaliProfile
+            engines[lang_code] = LpteEngine(BengaliProfile)
+        elif lang_code == "en":
+            from lpte.languages.en import EnglishProfile
+            engines[lang_code] = LpteEngine(EnglishProfile)
+        else:
+            from lpte.languages.en import EnglishProfile
+            engines[lang_code] = LpteEngine(EnglishProfile)
+    return engines[lang_code]
 
-	cmd := exec.Command(e.pythonPath, "-c", script)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("analyze failed: %w\n%s", err, output)
-	}
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        req = json.loads(line)
+        engine = get_engine(req.get("language_code", "en"))
+        cmd = req.get("command", "analyze")
 
-	var raw struct {
-		IsToxic      bool     `json:"is_toxic"`
-		Severity     int      `json:"severity"`
-		Confidence   float64  `json:"confidence"`
-		MatchedTerms []string `json:"matched_terms"`
-	}
-	if err := json.Unmarshal(output, &raw); err != nil {
-		return nil, fmt.Errorf("parse failed: %w", err)
-	}
+        if cmd == "analyze":
+            result = engine.analyze(req["text"], req.get("threshold", 0.6))
+            resp = {
+                "is_toxic": result.is_toxic,
+                "severity": result.severity.value,
+                "confidence": result.confidence,
+                "matched_terms": result.matched_terms,
+            }
+        elif cmd == "sanitize":
+            sanitized = engine.sanitize(req["text"], req.get("mask", "*"))
+            resp = {"sanitized": sanitized}
+        else:
+            resp = {"error": f"unknown command: {cmd}"}
 
-	return &Result{
-		IsToxic:      raw.IsToxic,
-		Severity:     Severity(raw.Severity),
-		Confidence:   raw.Confidence,
-		MatchedTerms: raw.MatchedTerms,
-	}, nil
-}
-
-func (e *Engine) getLptePath() string {
-	return "."
-}
+        print(json.dumps(resp), flush=True)
+    except Exception as e:
+        print(json.dumps({"error": str(e)}), flush=True)
+`

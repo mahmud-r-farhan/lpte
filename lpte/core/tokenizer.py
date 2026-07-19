@@ -69,7 +69,3 @@ class Tokenizer:
         if len(words) < n:
             return []
         return [" ".join(words[i : i + n]) for i in range(len(words) - n + 1)]
-
-
-# Module-level singleton
-tokenizer = Tokenizer()

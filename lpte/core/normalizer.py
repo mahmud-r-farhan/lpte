@@ -155,7 +155,3 @@ class TextNormalizer:
                 chars.append(" ")
             # else: drop
         return "".join(chars)
-
-
-# Module-level singleton
-normalizer = TextNormalizer()
