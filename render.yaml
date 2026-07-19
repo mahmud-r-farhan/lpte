@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: lpte-demo
+    runtime: python
+    buildCommand: pip install -r website/requirements.txt && pip install -e .
+    startCommand: python website/app.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"

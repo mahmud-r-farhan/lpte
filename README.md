@@ -272,6 +272,12 @@ The engine achieves this through:
 - Minimal object allocation in hot paths
 - Pre-computed suffix tables for stemming
 
+## Live Demo
+
+**[https://lpte-demo.onrender.com](https://lpte-demo.onrender.com)**
+
+Try the interactive web demo — type messages, test bypass tricks, and see real-time toxicity detection in action.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
