@@ -1,0 +1,16 @@
+{
+    "language_code": "es",
+    "language_name": "Español (Spanish)",
+    "bad_words": [
+        "puta", "mierda", "joder", "coño", "pendejo",
+        "cabrón", "chinga", "estúpido", "idiota", "imbecil",
+        "maldito", "hijueputa", "marica", "maricón", "puto"
+    ],
+    "context_rules": {},
+    "min_word_length": 2,
+    "suffix_rules": [
+        "ción", "siones", "mente", "ado", "ida", "ando", "iendo",
+        "oso", "osa", "osos", "osas", "ito", "ita", "itos", "itas",
+        "es", "s", "é", "ía"
+    ]
+}

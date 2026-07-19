@@ -1,0 +1,20 @@
+name: lpte_flutter
+description: >-
+  Open-Source Local Profanity & Toxicity Engine — Flutter plugin.
+  Zero-cost, on-device text analysis for Bengali and English.
+version: 1.0.0
+homepage: https://github.com/lpte/lpte
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.10.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  lpte: ^1.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0

@@ -1,0 +1,23 @@
+{
+    "language_code": "en",
+    "language_name": "English",
+    "bad_words": [
+        "fuck", "shit", "ass", "asshole", "bastard", "damn",
+        "hell", "crap", "piss", "dick", "cock", "pussy", "tits",
+        "nigger", "nigga", "spic", "chink", "kike", "wetback",
+        "faggot", "fag", "dyke", "homo", "queer", "tranny",
+        "retard", "retarded", "cripple",
+        "motherfucker", "cocksucker", "bullshit"
+    ],
+    "context_rules": {
+        "ass": ["class", "grass", "bass", "brass", "mass", "pass"]
+    },
+    "min_word_length": 2,
+    "suffix_rules": [
+        "ation", "ition", "ness", "ment", "able", "ible",
+        "tion", "sion", "ence", "ance",
+        "ing", "ied", "ies",
+        "ful", "less", "ous", "ive", "ly", "er", "est",
+        "ed", "es", "s"
+    ]
+}
