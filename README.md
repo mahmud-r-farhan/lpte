@@ -106,6 +106,20 @@ if (result.isToxic) {
 }
 ```
 
+### Web Demo
+
+```bash
+# Install dependencies
+pip install fastapi uvicorn
+
+# Run the web demo
+python website/app.py
+
+# Visit http://localhost:8000
+```
+
+The web demo includes a chat-like interface where you can test toxicity detection in real-time. Type messages, try bypass tricks (leetspeak, dot separators, word splitting), and see how the engine responds.
+
 ## Architecture
 
 ```

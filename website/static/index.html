@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LPTE — Toxicity Detection Demo</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            dark: { 900: '#0a0a0f', 800: '#12121a', 700: '#1a1a25', 600: '#242430' },
+            toxic: { red: '#ff4757', orange: '#ff6b35', yellow: '#ffc048', green: '#2ed573', blue: '#3498ff' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+    body { font-family: 'Inter', sans-serif; background: #0a0a0f; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    .glow-green { box-shadow: 0 0 20px rgba(46, 213, 115, 0.15); }
+    .glow-red { box-shadow: 0 0 20px rgba(255, 71, 87, 0.15); }
+    .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.06); }
+    .message-enter { animation: slideUp 0.3s ease-out; }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .pulse-dot { animation: pulse-dot 1.5s infinite; }
+    .severity-bar { transition: width 0.5s ease-out; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+    textarea:focus { outline: none; }
+  </style>
+</head>
+<body class="bg-dark-900 text-white min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useRef, useEffect, useCallback } = React;
+
+    // ─── API Client ───────────────────────────────────────────────
+    async function analyzeText(text, language = 'en', threshold = 0.6) {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, language, threshold }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Analysis failed');
+      }
+      return res.json();
+    }
+
+    // ─── Severity Badge ───────────────────────────────────────────
+    function SeverityBadge({ severity }) {
+      const config = {
+        NONE:     { color: 'bg-gray-500/20 text-gray-400 border-gray-500/30', label: 'CLEAN' },
+        LOW:      { color: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30', label: 'LOW' },
+        MEDIUM:   { color: 'bg-orange-500/15 text-orange-400 border-orange-500/30', label: 'MEDIUM' },
+        HIGH:     { color: 'bg-red-500/15 text-red-400 border-red-500/30', label: 'HIGH' },
+        CRITICAL: { color: 'bg-red-600/20 text-red-300 border-red-600/30', label: 'CRITICAL' },
+      }[severity] || { color: 'bg-gray-500/20 text-gray-400', label: severity };
+
+      return (
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${config.color}`}>
+          {config.label}
+        </span>
+      );
+    }
+
+    // ─── Confidence Bar ───────────────────────────────────────────
+    function ConfidenceBar({ confidence, isToxic }) {
+      const pct = Math.round(confidence * 100);
+      const color = isToxic
+        ? confidence >= 0.9 ? 'bg-red-500' : confidence >= 0.7 ? 'bg-orange-500' : 'bg-yellow-500'
+        : 'bg-green-500';
+
+      return (
+        <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+          <div className={`h-full rounded-full severity-bar ${color}`} style={{ width: `${pct}%` }} />
+        </div>
+      );
+    }
+
+    // ─── Message Bubble ───────────────────────────────────────────
+    function MessageBubble({ message }) {
+      const { text, result, isUser, timestamp } = message;
+
+      if (isUser) {
+        return (
+          <div className="flex justify-end message-enter">
+            <div className="max-w-[75%] bg-blue-600/90 text-white rounded-2xl rounded-br-md px-4 py-2.5">
+              <p className="text-sm leading-relaxed">{text}</p>
+              <span className="text-[10px] text-blue-200/50 mt-1 block text-right">{timestamp}</span>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="flex justify-start message-enter">
+          <div className={`max-w-[85%] rounded-2xl rounded-bl-md px-4 py-3 ${
+            result?.is_toxic ? 'glass glow-red' : 'glass glow-green'
+          }`}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className={`w-2 h-2 rounded-full ${result?.is_toxic ? 'bg-red-400' : 'bg-green-400'} pulse-dot`} />
+              <span className="text-xs font-medium text-white/50">LPTE Engine</span>
+              {result && <SeverityBadge severity={result.severity} />}
+            </div>
+
+            {result?.sanitized && result.sanitized !== text && (
+              <div className="mb-2 px-3 py-1.5 bg-white/5 rounded-lg">
+                <span className="text-[10px] text-white/40 uppercase tracking-wider">Sanitized</span>
+                <p className="text-sm text-green-400/90 mono mt-0.5">{result.sanitized}</p>
+              </div>
+            )}
+
+            <ConfidenceBar confidence={result?.confidence || 0} isToxic={result?.is_toxic || false} />
+
+            <div className="flex items-center gap-3 mt-2">
+              <span className="text-xs text-white/40 mono">
+                {(result?.confidence * 100).toFixed(1)}%
+              </span>
+              {result?.matched_terms?.length > 0 && (
+                <div className="flex gap-1 flex-wrap">
+                  {result.matched_terms.map((term, i) => (
+                    <span key={i} className="text-[10px] bg-red-500/15 text-red-300 px-1.5 py-0.5 rounded mono">
+                      {term}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {result?.signals && (
+              <div className="flex gap-2 mt-2 flex-wrap">
+                {Object.entries(result.signals).map(([key, val]) => val > 0 && (
+                  <span key={key} className="text-[10px] bg-white/5 text-white/30 px-1.5 py-0.5 rounded mono">
+                    {key}: {val}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <span className="text-[10px] text-white/30 mt-1.5 block">{timestamp}</span>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Quick Examples ───────────────────────────────────────────
+    const EXAMPLES = [
+      { text: "Hello, how are you today?", lang: "en", label: "Clean message" },
+      { text: "f4ck this bullsh1t", lang: "en", label: "Leetspeak bypass" },
+      { text: "f.u.c.k you", lang: "en", label: "Dot separators" },
+      { text: "f u c k off", lang: "en", label: "Word splitting" },
+      { text: "you are a bastard", lang: "en", label: "Direct profanity" },
+      { text: "the class assessment was great", lang: "en", label: "False positive test" },
+      { text: "কুত্তা", lang: "bn", label: "Bengali profanity" },
+      { text: "আমি বাংলায় কথা বলি", lang: "bn", label: "Clean Bengali" },
+    ];
+
+    // ─── Main App ─────────────────────────────────────────────────
+    function App() {
+      const [messages, setMessages] = useState([]);
+      const [input, setInput] = useState('');
+      const [language, setLanguage] = useState('en');
+      const [loading, setLoading] = useState(false);
+      const messagesEndRef = useRef(null);
+      const inputRef = useRef(null);
+
+      const scrollToBottom = useCallback(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, []);
+
+      useEffect(scrollToBottom, [messages, scrollToBottom]);
+
+      const getNow = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      const handleSend = async (text = input, lang = language) => {
+        if (!text.trim() || loading) return;
+
+        const userMsg = { id: Date.now(), text, isUser: true, timestamp: getNow() };
+        setMessages(prev => [...prev, userMsg]);
+        setInput('');
+        setLoading(true);
+
+        try {
+          const result = await analyzeText(text, lang);
+          const botMsg = {
+            id: Date.now() + 1,
+            text,
+            result,
+            isUser: false,
+            timestamp: getNow(),
+          };
+          setMessages(prev => [...prev, botMsg]);
+        } catch (err) {
+          const errMsg = {
+            id: Date.now() + 1,
+            text: `Error: ${err.message}`,
+            result: null,
+            isUser: false,
+            timestamp: getNow(),
+          };
+          setMessages(prev => [...prev, errMsg]);
+        } finally {
+          setLoading(false);
+          inputRef.current?.focus();
+        }
+      };
+
+      const handleKeyDown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          handleSend();
+        }
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col bg-dark-900">
+          {/* Header */}
+          <header className="border-b border-white/5 bg-dark-800/80 backdrop-blur-xl sticky top-0 z-50">
+            <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-green-500 to-blue-600 flex items-center justify-center">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                  </svg>
+                </div>
+                <div>
+                  <h1 className="text-sm font-bold tracking-tight">LPTE</h1>
+                  <p className="text-[11px] text-white/30">Local Profanity & Toxicity Engine</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                  className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white/70 appearance-none cursor-pointer hover:bg-white/10 transition-colors"
+                >
+                  <option value="en">English</option>
+                  <option value="bn">বাংলা</option>
+                </select>
+              </div>
+            </div>
+          </header>
+
+          {/* Messages */}
+          <main className="flex-1 overflow-y-auto">
+            <div className="max-w-4xl mx-auto px-4 py-6 space-y-4">
+              {messages.length === 0 && (
+                <div className="text-center py-16">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-green-500/20 to-blue-600/20 flex items-center justify-center border border-white/5">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-green-400">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                  </div>
+                  <h2 className="text-lg font-semibold mb-1">Try the Toxicity Engine</h2>
+                  <p className="text-sm text-white/40 max-w-md mx-auto mb-8">
+                    Type anything to test real-time toxicity detection. The engine analyzes text for profanity, obfuscation bypasses, and offensive content.
+                  </p>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-w-2xl mx-auto">
+                    {EXAMPLES.map((ex, i) => (
+                      <button
+                        key={i}
+                        onClick={() => handleSend(ex.text, ex.lang)}
+                        className="glass rounded-xl px-3 py-2.5 text-left hover:bg-white/5 transition-all group"
+                      >
+                        <span className="text-[10px] text-white/30 uppercase tracking-wider block mb-1">{ex.label}</span>
+                        <span className="text-xs text-white/60 group-hover:text-white/90 transition-colors line-clamp-2">
+                          {ex.text}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {messages.map(msg => (
+                <MessageBubble key={msg.id} message={msg} />
+              ))}
+
+              {loading && (
+                <div className="flex justify-start message-enter">
+                  <div className="glass rounded-2xl rounded-bl-md px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="flex gap-1">
+                        <span className="w-1.5 h-1.5 bg-green-400 rounded-full pulse-dot" style={{ animationDelay: '0ms' }} />
+                        <span className="w-1.5 h-1.5 bg-green-400 rounded-full pulse-dot" style={{ animationDelay: '200ms' }} />
+                        <span className="w-1.5 h-1.5 bg-green-400 rounded-full pulse-dot" style={{ animationDelay: '400ms' }} />
+                      </div>
+                      <span className="text-xs text-white/30">Analyzing...</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+          </main>
+
+          {/* Input */}
+          <footer className="border-t border-white/5 bg-dark-800/80 backdrop-blur-xl sticky bottom-0">
+            <div className="max-w-4xl mx-auto px-4 py-3">
+              <div className="flex items-end gap-2 glass rounded-2xl px-3 py-2">
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Type a message to test toxicity detection..."
+                  rows={1}
+                  className="flex-1 bg-transparent text-sm text-white placeholder-white/25 resize-none py-1.5 max-h-32"
+                  style={{ minHeight: '24px' }}
+                  onInput={(e) => {
+                    e.target.style.height = '24px';
+                    e.target.style.height = Math.min(e.target.scrollHeight, 128) + 'px';
+                  }}
+                />
+                <button
+                  onClick={() => handleSend()}
+                  disabled={!input.trim() || loading}
+                  className="w-9 h-9 rounded-xl bg-gradient-to-r from-green-500 to-blue-600 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:scale-105 transition-transform flex-shrink-0"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                </button>
+              </div>
+              <p className="text-[10px] text-white/20 text-center mt-2">
+                Press Enter to send &middot; Shift+Enter for new line &middot; Powered by LPTE v1.0.0
+              </p>
+            </div>
+          </footer>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
