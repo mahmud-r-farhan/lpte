@@ -1,7 +1,7 @@
-# Build
+﻿# Build
 __pycache__/
 *.py[cod]
-*$py.class
+$py.class
 *.so
 *.egg-info/
 *.egg
@@ -36,3 +36,6 @@ desktop.ini
 
 # Local tooling
 .mimocode/
+
+# Build logs
+render-build-faild.txt
