@@ -14,6 +14,23 @@ LPTE is an open-source Python library for detecting and filtering toxic, profane
 - **Zero Dependencies** — Pure Python, no external packages required
 - **Pluggable Architecture** — Drop in a JSON language file, no code changes needed
 
+## Platform Support
+
+| Platform | Language | Package | Status |
+|----------|----------|---------|--------|
+| **Python** | Python 3.9+ | `pip install lpte` | Core engine |
+| **Flutter** | Dart | `lpte_flutter` | Plugin ready |
+| **Android** | Kotlin | `lpte-android` | Wrapper ready |
+| **iOS** | Swift | `LpteModule` | Bridge ready |
+| **React Native** | TypeScript | `lpte-react-native` | Plugin ready |
+| **Node.js** | TypeScript | `lpte` (npm) | Module ready |
+| **Go** | Go 1.21+ | `github.com/lpte/lpte` | Bindings ready |
+| **Rust** | Rust 2021 | `lpte` (crates) | Bindings ready |
+| **.NET/C#** | C# / .NET 7+ | `Lpte` (NuGet) | Wrapper ready |
+| **PHP** | PHP 8.0+ | `lpte/lpte` (Composer) | Wrapper ready |
+
+All platform wrappers communicate with the Python core engine via subprocess IPC, with optional embedded Python for production deployments.
+
 ## Quick Start
 
 ### Install
@@ -114,9 +131,16 @@ lpte/
 │
 ├── platforms/
 │   ├── flutter/             # Flutter plugin (Dart)
-│   └── android/             # Android wrapper (Kotlin)
+│   ├── android/             # Android wrapper (Kotlin)
+│   ├── ios/                 # iOS wrapper (Swift) + React Native bridge
+│   ├── react-native/        # React Native plugin (TypeScript)
+│   ├── nodejs/              # Node.js module (TypeScript)
+│   ├── go/                  # Go bindings
+│   ├── rust/                # Rust bindings
+│   ├── dotnet/              # .NET/C# wrapper
+│   └── php/                 # PHP wrapper
 │
-├── tests/                   # 40+ test cases
+├── tests/                   # 78 test cases
 └── example/                 # Demo application
 ```
 
@@ -128,7 +152,7 @@ Raw text passes through a multi-stage normalization pipeline:
 
 1. **Zero-width character stripping** — Removes invisible Unicode characters
 2. **Accent/diacritic stripping** — Normalizes accented characters
-3. **Leetspeak reversal** — `0→o`, `1→i`, `3→e`, `4→a`, `@→a`, `$→s`, etc.
+3. **Leetspeak reversal** — `0→o`, `1→i`, `3→e`, `4→u`, `@→a`, `$→s`, etc.
 4. **Repeated character collapse** — `fuuuuck` → `fu` (2 chars)
 5. **Character sanitization** — Strips non-alphanumeric (preserves Bengali)
 6. **Case folding** — Lowercase normalization

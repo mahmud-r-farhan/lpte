@@ -1,0 +1,19 @@
+{
+    "name": "lpte/lpte",
+    "description": "LPTE — Local Profanity & Toxicity Engine",
+    "type": "library",
+    "license": "MIT",
+    "minimum-stability": "stable",
+    "require": {
+        "php": ">=8.0",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Lpte\\": "src/"
+        }
+    }
+}
