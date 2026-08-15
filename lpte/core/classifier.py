@@ -2,13 +2,15 @@
 Multi-signal toxicity classifier.
 
 Scoring approach:
-1. Exact root-word match → confidence 1.0
-2. Stemmed match → confidence 0.85
-3. Concatenated-word match (split bypasses) → confidence 0.7
+1. Exact / stemmed match (merged single loop) → confidence 1.0 / 0.85
+2. Phrase match (bigrams/trigrams vs bad_word phrases) → confidence 0.80
+3. Concatenated-word match (split bypasses like "f u c k") → confidence 0.70
 4. Fuzzy match (edit distance ≤ 1) → confidence 0.65
 
 Context rules suppress false positives: if a bad word has context rules
 and the input word is a known clean variant, the match is skipped.
+
+min_word_length from LanguageProfile is enforced before any matching.
 """
 
 from __future__ import annotations
@@ -41,6 +43,8 @@ class ClassificationResult:
     signals: dict[str, int] = field(default_factory=dict)
 
 
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
 def _edit_distance_1(s: str, t: str) -> bool:
     """Check if two strings differ by at most 1 edit (insert, delete, substitute)."""
     if abs(len(s) - len(t)) > 1:
@@ -71,6 +75,8 @@ def _is_context_clean(word: str, bad_word: str, context_rules: dict[str, set[str
     return word in clean_words
 
 
+# ─── Classifier ───────────────────────────────────────────────────────────────
+
 class Classifier:
     """Classifies tokenized text against a language profile."""
 
@@ -84,53 +90,86 @@ class Classifier:
         signals: dict[str, int] = {
             "exact_match": 0,
             "stemmed_match": 0,
+            "phrase_match": 0,
             "concat_match": 0,
             "fuzzy_match": 0,
         }
 
         bad_words = profile.bad_words
-        words = tokens.words
+        min_len = profile.min_word_length
         context_rules = profile.context_rules
 
-        # 1. Exact root-word matching (with context rule check)
-        for word in words:
-            root = profile.stemmer.stem(word)
-            if root in bad_words or word in bad_words:
-                matched_bad = root if root in bad_words else word
-                if _is_context_clean(word, matched_bad, context_rules):
-                    continue
-                matched_terms.append(root)
-                signals["exact_match"] += 1
+        # Filter words by min_word_length for exact/stemmed matching
+        words = [w for w in tokens.words if len(w) >= min_len]
+        # Keep ALL words (including single chars) for concat detection
+        all_words = tokens.words
 
-        # 2. Stemmed matching (only if no exact matches)
-        if not matched_terms:
-            for word in words:
-                stemmed = profile.stemmer.stem(word)
-                if stemmed in bad_words:
-                    if _is_context_clean(word, stemmed, context_rules):
-                        continue
+        # ── Signal 1: Exact + Stemmed match (single merged loop) ──────────────
+        # Stem each word once and check both the stemmed and original forms.
+        for word in words:
+            stemmed = profile.stemmer.stem(word)
+
+            if word in bad_words:
+                if not _is_context_clean(word, word, context_rules):
+                    matched_terms.append(word)
+                    signals["exact_match"] += 1
+                    continue
+
+            if stemmed != word and stemmed in bad_words:
+                if not _is_context_clean(word, stemmed, context_rules):
                     matched_terms.append(stemmed)
                     signals["stemmed_match"] += 1
 
-        # 3. Concatenated-word detection (catches "f u c k" → "fuck")
-        if not matched_terms and len(words) >= 2:
-            for window_size in range(2, min(len(words) + 1, 6)):
-                for i in range(len(words) - window_size + 1):
-                    window = words[i : i + window_size]
+        # ── Signal 2: Phrase match — bigrams and trigrams vs bad word set ──────
+        # This catches multi-word toxic phrases not caught by single-word matching.
+        if not matched_terms:
+            all_ngrams = tokens.bigrams + tokens.trigrams
+            for ngram in all_ngrams:
+                # Check the raw n-gram and its stemmed components
+                ngram_joined = ngram.replace(" ", "")
+                if ngram in bad_words or ngram_joined in bad_words:
+                    matched_terms.append(ngram)
+                    signals["phrase_match"] += 1
+                    break
+                # Also try stemming each word in the n-gram
+                ngram_words = ngram.split()
+                stemmed_ngram = " ".join(profile.stemmer.stem(w) for w in ngram_words)
+                if stemmed_ngram in bad_words:
+                    matched_terms.append(stemmed_ngram)
+                    signals["phrase_match"] += 1
+                    break
+
+        # ── Signal 3: Concatenated-word detection ("f u c k" → "fuck") ─────────
+        # Uses all_words (unfiltered) so single-char split words are included.
+        if not matched_terms and len(all_words) >= 2:
+            for window_size in range(2, min(len(all_words) + 1, 6)):
+                found = False
+                for i in range(len(all_words) - window_size + 1):
+                    window = all_words[i: i + window_size]
+                    # Only try windows of short single-char/double-char words
                     if all(len(w) <= 3 for w in window):
                         concatenated = "".join(window)
                         for bad_word in bad_words:
                             if bad_word in concatenated:
                                 matched_terms.append(bad_word)
                                 signals["concat_match"] += 1
+                                found = True
                                 break
+                    if found:
+                        break
+                if found:
+                    break
 
-        # 4. Fuzzy matching — edit distance ≤ 1 (with context rule check)
+        # ── Signal 4: Fuzzy matching — edit distance ≤ 1 ─────────────────────
+        # Require both word and bad_word to be >= 5 chars to avoid false
+        # positives from short common words ("today", "you", "are", etc.).
         if not matched_terms:
             for word in words:
-                if len(word) < 3:
+                if len(word) < 5:
                     continue
                 for bad_word in bad_words:
+                    if len(bad_word) < 5:
+                        continue
                     if abs(len(word) - len(bad_word)) <= 1 and _edit_distance_1(word, bad_word):
                         if _is_context_clean(word, bad_word, context_rules):
                             continue
@@ -138,7 +177,7 @@ class Classifier:
                         signals["fuzzy_match"] += 1
                         break
 
-        # Calculate confidence with per-signal floors
+        # ── Confidence calculation ─────────────────────────────────────────────
         confidence = 0.0
 
         if signals["exact_match"] > 0:
@@ -147,12 +186,16 @@ class Classifier:
         if signals["stemmed_match"] > 0:
             confidence = max(confidence, min(0.5 + signals["stemmed_match"] * 0.2, 0.9))
 
+        if signals["phrase_match"] > 0:
+            confidence = max(confidence, min(0.5 + signals["phrase_match"] * 0.2, 0.85))
+
         if signals["concat_match"] > 0:
             confidence = max(confidence, min(0.5 + signals["concat_match"] * 0.2, 0.85))
 
         if signals["fuzzy_match"] > 0:
             confidence = max(confidence, min(0.5 + signals["fuzzy_match"] * 0.15, 0.75))
 
+        # ── Severity mapping ──────────────────────────────────────────────────
         if confidence >= 0.9:
             severity = Severity.CRITICAL
         elif confidence >= 0.7:

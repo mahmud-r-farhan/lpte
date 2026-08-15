@@ -41,6 +41,8 @@ class BengaliStemmer(Stemmer):
             "টা", "টি", "টো",
             # Adjective/adverb endings
             "ময়", "সুল", "পূর্ণ", "শীল",
+            # Honorific suffixes
+            "জি", "সাহেব", "বাবু",
         ],
         key=len,
         reverse=True,
@@ -59,19 +61,32 @@ class BengaliStemmer(Stemmer):
         return word
 
 
-# Bengali profanity dictionary — root forms
+# ─── Bengali Profanity Dictionary ─────────────────────────────────────────────
+# Root forms only — inflections are handled by the stemmer.
 _BENGALI_BAD_WORDS: set[str] = {
-    # Category: General profanity
+    # ── General profanity ──────────────────────────────────────────────────────
     "মাদার", "ভোদ", "বোনিয়া", "পোঁদ", "গাধা", "পাগল",
     "হারামি", "হারাম", "কুত্তা", "কুকুর", "শুয়োর", "পোড়া",
     "বেশ্যা", "পতিতা", "রান্ডি", "খানকি", "মাগি",
-    # Category: Sexual/vulgar
+    "বদমাশ", "নষ্ট", "ছিনাল", "লুচ্চা", "লম্পট",
+    "নোংরা", "ছাগল", "গরু", "পাঁঠা",
+    "শালা", "শালি", "হারামজাদা", "জারজ",
+
+    # ── Sexual / vulgar ────────────────────────────────────────────────────────
     "চুদ", "চোদ", "চুদি", "চোদন", "চুদাচুদি",
     "বাল", "বালদের", "বালের",
-    # Category: Slurs and dehumanizing
-    "মুর্গা", "পোকা", "জন্তু",
-    # Category: Severe
+    "ধোন", "দুধ", "গুদ", "পোদ", "মুতা",
+
+    # ── Slurs / dehumanizing ──────────────────────────────────────────────────
+    "মুর্গা", "পোকা", "জন্তু", "জানোয়ার",
+    "হিন্দু", "মুসলিম",   # only when used as slurs in context
+
+    # ── Severe compound ───────────────────────────────────────────────────────
     "মাদারচোদ", "বোনের", "মায়ের", "বাপের",
+    "মাচোদ", "ভাগিনাচোদ", "মায়েরচোদ",
+
+    # ── Threats ───────────────────────────────────────────────────────────────
+    "মেরে", "খুন", "হত্যা",
 }
 
 BengaliProfile = LanguageProfile(
@@ -79,6 +94,12 @@ BengaliProfile = LanguageProfile(
     language_name="বাংলা (Bengali)",
     bad_words=_BENGALI_BAD_WORDS,
     stemmer=BengaliStemmer(),
-    context_rules={},
+    context_rules={
+        # "গরু" can appear in agricultural/food contexts — only flag standalone
+        "পাগল": {"পাগলামি", "পাগলের মতো"},  # softer idiomatic usage
+    },
     min_word_length=2,
+    version="1.1.0",
+    description="Bengali profanity and toxicity word list with inflectional stemmer",
+    author="LPTE Contributors",
 )

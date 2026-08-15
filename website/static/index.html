@@ -3,49 +3,529 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LPTE — Toxicity Detection Demo</title>
+  <title>LPTE — Local Profanity & Toxicity Engine</title>
+  <meta name="description" content="Zero-cost, on-device real-time toxicity detection. Test bypass tricks, batch analysis, and live stats." />
   <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            dark: { 900: '#0a0a0f', 800: '#12121a', 700: '#1a1a25', 600: '#242430' },
-            toxic: { red: '#ff4757', orange: '#ff6b35', yellow: '#ffc048', green: '#2ed573', blue: '#3498ff' }
-          }
-        }
-      }
-    }
-  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
-    body { font-family: 'Inter', sans-serif; background: #0a0a0f; }
-    .mono { font-family: 'JetBrains Mono', monospace; }
-    .glow-green { box-shadow: 0 0 20px rgba(46, 213, 115, 0.15); }
-    .glow-red { box-shadow: 0 0 20px rgba(255, 71, 87, 0.15); }
-    .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.06); }
-    .message-enter { animation: slideUp 0.3s ease-out; }
-    @keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-    .pulse-dot { animation: pulse-dot 1.5s infinite; }
-    .severity-bar { transition: width 0.5s ease-out; }
-    ::-webkit-scrollbar { width: 6px; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-900: #080810;
+      --bg-800: #0f0f1a;
+      --bg-700: #161624;
+      --bg-600: #1e1e30;
+      --bg-500: #252540;
+      --border: rgba(255,255,255,0.07);
+      --border-hover: rgba(255,255,255,0.14);
+      --text: #e8e8f0;
+      --text-dim: rgba(232,232,240,0.5);
+      --text-muted: rgba(232,232,240,0.25);
+      --green: #22d97b;
+      --green-dim: rgba(34,217,123,0.12);
+      --red: #ff4560;
+      --red-dim: rgba(255,69,96,0.12);
+      --orange: #ff7c3a;
+      --orange-dim: rgba(255,124,58,0.12);
+      --yellow: #ffc048;
+      --blue: #4d9fff;
+      --blue-dim: rgba(77,159,255,0.15);
+      --purple: #a855f7;
+      --accent: linear-gradient(135deg, #22d97b 0%, #4d9fff 100%);
+      --accent-toxic: linear-gradient(135deg, #ff4560 0%, #ff7c3a 100%);
+      --font: 'Inter', system-ui, sans-serif;
+      --mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --radius: 14px;
+      --radius-sm: 8px;
+      --radius-lg: 20px;
+      --shadow: 0 4px 24px rgba(0,0,0,0.4);
+      --shadow-lg: 0 8px 48px rgba(0,0,0,0.6);
+    }
+
+    html, body { height: 100%; }
+    body { font-family: var(--font); background: var(--bg-900); color: var(--text); line-height: 1.5; overflow: hidden; }
+    #root { height: 100vh; display: flex; flex-direction: column; }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
-    textarea:focus { outline: none; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+    /* Glassmorphism */
+    .glass {
+      background: rgba(255,255,255,0.03);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+    }
+    .glass:hover { border-color: var(--border-hover); }
+
+    /* Animations */
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.9); }
+    }
+    @keyframes shimmer {
+      0% { background-position: -200% center; }
+      100% { background-position: 200% center; }
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes glow-green {
+      0%, 100% { box-shadow: 0 0 10px rgba(34,217,123,0.2); }
+      50% { box-shadow: 0 0 25px rgba(34,217,123,0.4); }
+    }
+    @keyframes glow-red {
+      0%, 100% { box-shadow: 0 0 10px rgba(255,69,96,0.2); }
+      50% { box-shadow: 0 0 25px rgba(255,69,96,0.4); }
+    }
+    @keyframes bar-fill { from { width: 0; } to { width: var(--w); } }
+
+    .animate-slide-up { animation: slideUp 0.3s ease-out; }
+    .animate-fade { animation: fadeIn 0.4s ease-out; }
+    .pulse-dot { animation: pulse 1.4s ease-in-out infinite; }
+
+    /* Typography */
+    .mono { font-family: var(--mono); }
+    .label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: transparent;
+    }
+    .btn-primary:hover:not(:disabled) { filter: brightness(1.1); transform: translateY(-1px); }
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-dim);
+      border-color: var(--border);
+    }
+    .btn-ghost:hover:not(:disabled) { background: var(--bg-600); color: var(--text); border-color: var(--border-hover); }
+    .btn-danger {
+      background: var(--red-dim);
+      color: var(--red);
+      border-color: rgba(255,69,96,0.25);
+    }
+    .btn-danger:hover:not(:disabled) { background: rgba(255,69,96,0.2); }
+    .btn-icon {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border-radius: var(--radius-sm);
+    }
+
+    /* Send button */
+    .send-btn {
+      width: 38px; height: 38px;
+      border-radius: 10px;
+      background: var(--accent);
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all 0.15s ease;
+    }
+    .send-btn:hover:not(:disabled) { filter: brightness(1.15); transform: scale(1.05); }
+    .send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    /* Header */
+    .app-header {
+      border-bottom: 1px solid var(--border);
+      background: rgba(8,8,16,0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      z-index: 100;
+      flex-shrink: 0;
+    }
+    .header-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo-badge {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      background: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .header-title { font-size: 14px; font-weight: 800; letter-spacing: -0.02em; }
+    .header-sub { font-size: 11px; color: var(--text-muted); }
+    .header-controls { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+    /* Tab Bar */
+    .tab-bar {
+      display: flex;
+      gap: 2px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-800);
+      padding: 0 16px;
+      flex-shrink: 0;
+      overflow-x: auto;
+    }
+    .tab {
+      padding: 9px 14px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+    .tab:hover { color: var(--text-dim); }
+    .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+
+    /* Main layout */
+    .app-body {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      max-width: 1100px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    .panel {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    /* Message list */
+    .msg-list { display: flex; flex-direction: column; gap: 12px; }
+
+    /* User bubble */
+    .msg-user {
+      display: flex;
+      justify-content: flex-end;
+    }
+    .msg-user-inner {
+      max-width: 72%;
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      border-radius: 16px 16px 4px 16px;
+      padding: 10px 14px;
+      box-shadow: var(--shadow);
+    }
+    .msg-user-text { font-size: 13px; line-height: 1.55; }
+    .msg-time { font-size: 10px; color: rgba(255,255,255,0.35); margin-top: 4px; text-align: right; }
+
+    /* Engine bubble */
+    .msg-engine { display: flex; justify-content: flex-start; }
+    .msg-engine-inner {
+      max-width: 85%;
+      border-radius: 16px 16px 16px 4px;
+      padding: 12px 14px;
+    }
+    .msg-engine-inner.clean {
+      background: var(--green-dim);
+      border: 1px solid rgba(34,217,123,0.2);
+      animation: glow-green 3s ease-in-out infinite;
+    }
+    .msg-engine-inner.toxic {
+      background: var(--red-dim);
+      border: 1px solid rgba(255,69,96,0.2);
+      animation: glow-red 3s ease-in-out infinite;
+    }
+
+    /* Confidence bar */
+    .conf-bar-track {
+      width: 100%;
+      height: 3px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 2px;
+      overflow: hidden;
+      margin: 8px 0;
+    }
+    .conf-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Badge */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      border: 1px solid;
+    }
+
+    /* Signal chips */
+    .signal-chip {
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(255,255,255,0.04);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    /* Term chip */
+    .term-chip {
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: rgba(255,69,96,0.12);
+      color: #ff8099;
+      border: 1px solid rgba(255,69,96,0.2);
+    }
+
+    /* Input area */
+    .input-footer {
+      border-top: 1px solid var(--border);
+      background: rgba(8,8,16,0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      flex-shrink: 0;
+    }
+    .input-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 10px 16px 12px;
+    }
+    .input-box {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      background: var(--bg-700);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 8px 8px 8px 14px;
+      transition: border-color 0.15s;
+    }
+    .input-box:focus-within { border-color: rgba(77,159,255,0.4); }
+    .input-textarea {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      line-height: 1.5;
+      resize: none;
+      min-height: 22px;
+      max-height: 120px;
+    }
+    .input-textarea::placeholder { color: var(--text-muted); }
+    .input-hint { font-size: 10px; color: var(--text-muted); text-align: center; margin-top: 6px; }
+
+    /* Realtime indicator */
+    .realtime-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      background: var(--bg-700);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 6px;
+      animation: slideUp 0.2s ease-out;
+    }
+
+    /* Stats grid */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+    .stat-card {
+      background: var(--bg-700);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+    .stat-value { font-size: 26px; font-weight: 800; letter-spacing: -0.03em; }
+    .stat-label { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+    /* Batch panel */
+    .batch-textarea {
+      width: 100%;
+      background: var(--bg-700);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 12px;
+      outline: none;
+      resize: vertical;
+      min-height: 140px;
+      transition: border-color 0.15s;
+    }
+    .batch-textarea:focus { border-color: rgba(77,159,255,0.4); }
+    .batch-result-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      background: var(--bg-700);
+      border: 1px solid var(--border);
+      animation: slideUp 0.2s ease-out;
+    }
+    .batch-result-row.toxic { border-color: rgba(255,69,96,0.2); background: var(--red-dim); }
+    .batch-result-row.clean { border-color: rgba(34,217,123,0.15); }
+
+    /* Select */
+    select {
+      background: var(--bg-700);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 12px;
+      padding: 6px 10px;
+      cursor: pointer;
+      outline: none;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    select:hover { border-color: var(--border-hover); }
+
+    /* Range slider */
+    input[type=range] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100px;
+      height: 4px;
+      background: var(--bg-500);
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--blue);
+      cursor: pointer;
+      box-shadow: 0 0 6px rgba(77,159,255,0.5);
+    }
+
+    /* Empty state */
+    .empty-state { text-align: center; padding: 48px 16px; }
+    .empty-icon {
+      width: 60px; height: 60px;
+      margin: 0 auto 16px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, rgba(34,217,123,0.15), rgba(77,159,255,0.15));
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .example-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; max-width: 520px; margin: 24px auto 0; }
+    @media (min-width: 640px) { .example-grid { grid-template-columns: repeat(4, 1fr); } }
+    .example-btn {
+      background: var(--bg-700);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .example-btn:hover { background: var(--bg-600); border-color: var(--border-hover); transform: translateY(-1px); }
+    .example-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); display: block; margin-bottom: 3px; }
+    .example-text { font-size: 11px; color: var(--text-dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+    /* Loading dots */
+    .loading-bubble {
+      display: flex;
+      justify-content: flex-start;
+    }
+    .loading-inner {
+      background: var(--bg-700);
+      border: 1px solid var(--border);
+      border-radius: 16px 16px 16px 4px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+    .dot:nth-child(1) { animation: pulse 1.2s 0ms infinite; }
+    .dot:nth-child(2) { animation: pulse 1.2s 200ms infinite; }
+    .dot:nth-child(3) { animation: pulse 1.2s 400ms infinite; }
+
+    /* Scrollable panel */
+    .scroll-panel { overflow-y: auto; flex: 1; }
   </style>
 </head>
-<body class="bg-dark-900 text-white min-h-screen">
+<body>
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useRef, useEffect, useCallback } = React;
+    const { useState, useRef, useEffect, useCallback, useMemo } = React;
 
-    // ─── API Client ───────────────────────────────────────────────
-    async function analyzeText(text, language = 'en', threshold = 0.6) {
+    // ─── Constants ────────────────────────────────────────────────────────────
+    const EXAMPLES = [
+      { text: "Hello, how are you today?",          lang: "en", label: "Clean message" },
+      { text: "f4ck this bullsh1t",                  lang: "en", label: "Leetspeak bypass" },
+      { text: "f.u.c.k you",                         lang: "en", label: "Dot separators" },
+      { text: "f u c k off",                         lang: "en", label: "Word splitting" },
+      { text: "you are a bastard",                   lang: "en", label: "Direct profanity" },
+      { text: "the class assessment was great",      lang: "en", label: "False positive test" },
+      { text: "কুত্তা",                              lang: "bn", label: "Bengali profanity" },
+      { text: "আমি বাংলায় কথা বলি",                lang: "bn", label: "Clean Bengali" },
+    ];
+
+    const SEVERITY_CONFIG = {
+      NONE:     { color: "#6b7280", bg: "rgba(107,114,128,0.12)", border: "rgba(107,114,128,0.25)", label: "CLEAN" },
+      LOW:      { color: "#fbbf24", bg: "rgba(251,191,36,0.12)",  border: "rgba(251,191,36,0.3)",  label: "LOW" },
+      MEDIUM:   { color: "#fb923c", bg: "rgba(251,146,60,0.12)",  border: "rgba(251,146,60,0.3)",  label: "MEDIUM" },
+      HIGH:     { color: "#f87171", bg: "rgba(248,113,113,0.12)", border: "rgba(248,113,113,0.3)", label: "HIGH" },
+      CRITICAL: { color: "#ff4560", bg: "rgba(255,69,96,0.15)",   border: "rgba(255,69,96,0.35)",  label: "CRITICAL" },
+    };
+
+    // ─── API ──────────────────────────────────────────────────────────────────
+    async function apiAnalyze(text, language, threshold) {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -58,290 +538,558 @@
       return res.json();
     }
 
-    // ─── Severity Badge ───────────────────────────────────────────
-    function SeverityBadge({ severity }) {
-      const config = {
-        NONE:     { color: 'bg-gray-500/20 text-gray-400 border-gray-500/30', label: 'CLEAN' },
-        LOW:      { color: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30', label: 'LOW' },
-        MEDIUM:   { color: 'bg-orange-500/15 text-orange-400 border-orange-500/30', label: 'MEDIUM' },
-        HIGH:     { color: 'bg-red-500/15 text-red-400 border-red-500/30', label: 'HIGH' },
-        CRITICAL: { color: 'bg-red-600/20 text-red-300 border-red-600/30', label: 'CRITICAL' },
-      }[severity] || { color: 'bg-gray-500/20 text-gray-400', label: severity };
+    async function apiBatch(texts, language, threshold) {
+      const res = await fetch('/api/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texts, language, threshold }),
+      });
+      if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || 'Batch failed'); }
+      return res.json();
+    }
 
+    async function apiStats() {
+      const res = await fetch('/api/stats');
+      if (!res.ok) throw new Error('Stats unavailable');
+      return res.json();
+    }
+
+    // ─── Hooks ────────────────────────────────────────────────────────────────
+    function useDebounce(value, delay) {
+      const [debouncedValue, setDebouncedValue] = useState(value);
+      useEffect(() => {
+        const timer = setTimeout(() => setDebouncedValue(value), delay);
+        return () => clearTimeout(timer);
+      }, [value, delay]);
+      return debouncedValue;
+    }
+
+    // ─── Sub-components ───────────────────────────────────────────────────────
+
+    function SeverityBadge({ severity }) {
+      const cfg = SEVERITY_CONFIG[severity] || SEVERITY_CONFIG.NONE;
       return (
-        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${config.color}`}>
-          {config.label}
+        <span className="badge" style={{ color: cfg.color, background: cfg.bg, borderColor: cfg.border }}>
+          {cfg.label}
         </span>
       );
     }
 
-    // ─── Confidence Bar ───────────────────────────────────────────
     function ConfidenceBar({ confidence, isToxic }) {
       const pct = Math.round(confidence * 100);
       const color = isToxic
-        ? confidence >= 0.9 ? 'bg-red-500' : confidence >= 0.7 ? 'bg-orange-500' : 'bg-yellow-500'
-        : 'bg-green-500';
-
+        ? confidence >= 0.9 ? '#ff4560' : confidence >= 0.7 ? '#fb923c' : '#fbbf24'
+        : '#22d97b';
       return (
-        <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-          <div className={`h-full rounded-full severity-bar ${color}`} style={{ width: `${pct}%` }} />
+        <div className="conf-bar-track">
+          <div className="conf-bar-fill" style={{ width: `${pct}%`, background: color }} />
         </div>
       );
     }
 
-    // ─── Message Bubble ───────────────────────────────────────────
     function MessageBubble({ message }) {
       const { text, result, isUser, timestamp } = message;
 
       if (isUser) {
         return (
-          <div className="flex justify-end message-enter">
-            <div className="max-w-[75%] bg-blue-600/90 text-white rounded-2xl rounded-br-md px-4 py-2.5">
-              <p className="text-sm leading-relaxed">{text}</p>
-              <span className="text-[10px] text-blue-200/50 mt-1 block text-right">{timestamp}</span>
+          <div className="msg-user animate-slide-up">
+            <div className="msg-user-inner">
+              <p className="msg-user-text">{text}</p>
+              <p className="msg-time">{timestamp}</p>
             </div>
           </div>
         );
       }
 
+      if (!result) return null;
+
+      const isToxic = result.is_toxic;
+
       return (
-        <div className="flex justify-start message-enter">
-          <div className={`max-w-[85%] rounded-2xl rounded-bl-md px-4 py-3 ${
-            result?.is_toxic ? 'glass glow-red' : 'glass glow-green'
-          }`}>
-            <div className="flex items-center gap-2 mb-2">
-              <div className={`w-2 h-2 rounded-full ${result?.is_toxic ? 'bg-red-400' : 'bg-green-400'} pulse-dot`} />
-              <span className="text-xs font-medium text-white/50">LPTE Engine</span>
-              {result && <SeverityBadge severity={result.severity} />}
-            </div>
-
-            {result?.sanitized && result.sanitized !== text && (
-              <div className="mb-2 px-3 py-1.5 bg-white/5 rounded-lg">
-                <span className="text-[10px] text-white/40 uppercase tracking-wider">Sanitized</span>
-                <p className="text-sm text-green-400/90 mono mt-0.5">{result.sanitized}</p>
-              </div>
-            )}
-
-            <ConfidenceBar confidence={result?.confidence || 0} isToxic={result?.is_toxic || false} />
-
-            <div className="flex items-center gap-3 mt-2">
-              <span className="text-xs text-white/40 mono">
-                {(result?.confidence * 100).toFixed(1)}%
-              </span>
-              {result?.matched_terms?.length > 0 && (
-                <div className="flex gap-1 flex-wrap">
-                  {result.matched_terms.map((term, i) => (
-                    <span key={i} className="text-[10px] bg-red-500/15 text-red-300 px-1.5 py-0.5 rounded mono">
-                      {term}
-                    </span>
-                  ))}
-                </div>
+        <div className="msg-engine animate-slide-up">
+          <div className={`msg-engine-inner ${isToxic ? 'toxic' : 'clean'}`}>
+            {/* Header row */}
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+              <div style={{
+                width:8, height:8, borderRadius:'50%',
+                background: isToxic ? 'var(--red)' : 'var(--green)',
+              }} className="pulse-dot" />
+              <span style={{ fontSize:11, color:'var(--text-muted)', fontWeight:500 }}>LPTE Engine</span>
+              <SeverityBadge severity={result.severity} />
+              {result.latency_ms != null && (
+                <span className="mono" style={{ fontSize:10, color:'var(--text-muted)', marginLeft:'auto' }}>
+                  {result.latency_ms}ms
+                </span>
               )}
             </div>
 
-            {result?.signals && (
-              <div className="flex gap-2 mt-2 flex-wrap">
-                {Object.entries(result.signals).map(([key, val]) => val > 0 && (
-                  <span key={key} className="text-[10px] bg-white/5 text-white/30 px-1.5 py-0.5 rounded mono">
-                    {key}: {val}
-                  </span>
+            {/* Sanitized output */}
+            {isToxic && result.sanitized && result.sanitized !== text && (
+              <div style={{
+                padding:'6px 10px', background:'rgba(255,255,255,0.04)',
+                borderRadius:8, marginBottom:8,
+              }}>
+                <span className="label">Sanitized</span>
+                <p className="mono" style={{ fontSize:12, color:'var(--green)', marginTop:2 }}>{result.sanitized}</p>
+              </div>
+            )}
+
+            <ConfidenceBar confidence={result.confidence} isToxic={isToxic} />
+
+            {/* Meta row */}
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:6, flexWrap:'wrap' }}>
+              <span className="mono" style={{ fontSize:11, color:'var(--text-muted)' }}>
+                {(result.confidence * 100).toFixed(1)}%
+              </span>
+              {result.matched_terms?.map((t, i) => (
+                <span key={i} className="term-chip">{t}</span>
+              ))}
+            </div>
+
+            {/* Active signals */}
+            {result.signals && (
+              <div style={{ display:'flex', gap:4, marginTop:6, flexWrap:'wrap' }}>
+                {Object.entries(result.signals).map(([k, v]) => v > 0 && (
+                  <span key={k} className="signal-chip">{k.replace('_', ' ')}: {v}</span>
                 ))}
               </div>
             )}
 
-            <span className="text-[10px] text-white/30 mt-1.5 block">{timestamp}</span>
+            <p style={{ fontSize:10, color:'var(--text-muted)', marginTop:6 }}>{timestamp}</p>
           </div>
         </div>
       );
     }
 
-    // ─── Quick Examples ───────────────────────────────────────────
-    const EXAMPLES = [
-      { text: "Hello, how are you today?", lang: "en", label: "Clean message" },
-      { text: "f4ck this bullsh1t", lang: "en", label: "Leetspeak bypass" },
-      { text: "f.u.c.k you", lang: "en", label: "Dot separators" },
-      { text: "f u c k off", lang: "en", label: "Word splitting" },
-      { text: "you are a bastard", lang: "en", label: "Direct profanity" },
-      { text: "the class assessment was great", lang: "en", label: "False positive test" },
-      { text: "কুত্তা", lang: "bn", label: "Bengali profanity" },
-      { text: "আমি বাংলায় কথা বলি", lang: "bn", label: "Clean Bengali" },
-    ];
+    // ─── Realtime Preview ─────────────────────────────────────────────────────
+    function RealtimePreview({ text, language, threshold }) {
+      const [result, setResult] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const debounced = useDebounce(text, 350);
 
-    // ─── Main App ─────────────────────────────────────────────────
-    function App() {
+      useEffect(() => {
+        if (!debounced.trim() || debounced.length < 2) { setResult(null); return; }
+        setLoading(true);
+        apiAnalyze(debounced, language, threshold)
+          .then(r => { setResult(r); setLoading(false); })
+          .catch(() => { setResult(null); setLoading(false); });
+      }, [debounced, language, threshold]);
+
+      if (!text.trim()) return null;
+
+      return (
+        <div className="realtime-pill">
+          {loading ? (
+            <>
+              <div style={{ width:6, height:6, borderRadius:'50%', border:'1.5px solid var(--blue)', borderTopColor:'transparent', animation:'spin 0.7s linear infinite' }} />
+              <span style={{ fontSize:11 }}>Analyzing…</span>
+            </>
+          ) : result ? (
+            <>
+              <div style={{
+                width:6, height:6, borderRadius:'50%',
+                background: result.is_toxic ? 'var(--red)' : 'var(--green)',
+              }} />
+              <SeverityBadge severity={result.severity} />
+              <span className="mono" style={{ fontSize:11 }}>{(result.confidence * 100).toFixed(0)}%</span>
+              {result.matched_terms?.length > 0 && (
+                <span className="term-chip">{result.matched_terms[0]}</span>
+              )}
+            </>
+          ) : null}
+        </div>
+      );
+    }
+
+    // ─── Chat Panel ───────────────────────────────────────────────────────────
+    function ChatPanel({ language, threshold }) {
       const [messages, setMessages] = useState([]);
       const [input, setInput] = useState('');
-      const [language, setLanguage] = useState('en');
       const [loading, setLoading] = useState(false);
-      const messagesEndRef = useRef(null);
-      const inputRef = useRef(null);
+      const bottomRef = useRef(null);
+      const textareaRef = useRef(null);
 
-      const scrollToBottom = useCallback(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, []);
+      useEffect(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, [messages, loading]);
 
-      useEffect(scrollToBottom, [messages, scrollToBottom]);
-
-      const getNow = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const getNow = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
 
       const handleSend = async (text = input, lang = language) => {
-        if (!text.trim() || loading) return;
-
-        const userMsg = { id: Date.now(), text, isUser: true, timestamp: getNow() };
-        setMessages(prev => [...prev, userMsg]);
+        const trimmed = text.trim();
+        if (!trimmed || loading) return;
         setInput('');
+        setMessages(prev => [...prev, { id: Date.now(), text: trimmed, isUser: true, timestamp: getNow() }]);
         setLoading(true);
-
         try {
-          const result = await analyzeText(text, lang);
-          const botMsg = {
-            id: Date.now() + 1,
-            text,
-            result,
-            isUser: false,
-            timestamp: getNow(),
-          };
-          setMessages(prev => [...prev, botMsg]);
+          const result = await apiAnalyze(trimmed, lang, threshold);
+          setMessages(prev => [...prev, { id: Date.now()+1, text: trimmed, result, isUser: false, timestamp: getNow() }]);
         } catch (err) {
-          const errMsg = {
-            id: Date.now() + 1,
-            text: `Error: ${err.message}`,
-            result: null,
-            isUser: false,
-            timestamp: getNow(),
-          };
-          setMessages(prev => [...prev, errMsg]);
+          setMessages(prev => [...prev, {
+            id: Date.now()+1, text: trimmed,
+            result: { is_toxic: false, severity: 'NONE', confidence: 0, matched_terms: [], signals: {}, sanitized: trimmed },
+            isUser: false, timestamp: getNow(),
+          }]);
         } finally {
           setLoading(false);
-          inputRef.current?.focus();
+          setTimeout(() => textareaRef.current?.focus(), 50);
         }
       };
 
-      const handleKeyDown = (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          handleSend();
-        }
+      const handleKeyDown = e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+      };
+
+      const clearHistory = () => setMessages([]);
+
+      const exportHistory = () => {
+        const data = messages.filter(m => !m.isUser).map(m => ({
+          text: m.text, is_toxic: m.result?.is_toxic, severity: m.result?.severity,
+          confidence: m.result?.confidence, matched_terms: m.result?.matched_terms,
+          timestamp: m.timestamp,
+        }));
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `lpte-history-${Date.now()}.json`;
+        a.click(); URL.revokeObjectURL(url);
       };
 
       return (
-        <div className="min-h-screen flex flex-col bg-dark-900">
-          {/* Header */}
-          <header className="border-b border-white/5 bg-dark-800/80 backdrop-blur-xl sticky top-0 z-50">
-            <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-green-500 to-blue-600 flex items-center justify-center">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <>
+          {/* Toolbar */}
+          {messages.length > 0 && (
+            <div style={{ display:'flex', gap:6, padding:'8px 16px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+              <span style={{ fontSize:11, color:'var(--text-muted)', marginRight:'auto', alignSelf:'center' }}>
+                {messages.filter(m => m.isUser).length} messages · {messages.filter(m => !m.isUser && m.result?.is_toxic).length} toxic
+              </span>
+              <button id="export-btn" className="btn btn-ghost btn-icon" title="Export JSON" onClick={exportHistory}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+              </button>
+              <button id="clear-btn" className="btn btn-ghost btn-icon" title="Clear history" onClick={clearHistory}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+                  <path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
+                </svg>
+              </button>
+            </div>
+          )}
+
+          {/* Messages */}
+          <div className="scroll-panel" style={{ padding:'16px' }}>
+            {messages.length === 0 ? (
+              <div className="empty-state animate-fade">
+                <div className="empty-icon">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                   </svg>
                 </div>
-                <div>
-                  <h1 className="text-sm font-bold tracking-tight">LPTE</h1>
-                  <p className="text-[11px] text-white/30">Local Profanity & Toxicity Engine</p>
+                <h2 style={{ fontSize:17, fontWeight:700, letterSpacing:'-0.02em', marginBottom:6 }}>Test the Toxicity Engine</h2>
+                <p style={{ fontSize:13, color:'var(--text-muted)', maxWidth:360, margin:'0 auto' }}>
+                  Type anything to detect profanity, obfuscation, and offensive content in real-time.
+                </p>
+                <div className="example-grid">
+                  {EXAMPLES.map((ex, i) => (
+                    <button key={i} id={`example-${i}`} className="example-btn" onClick={() => handleSend(ex.text, ex.lang)}>
+                      <span className="example-label">{ex.label}</span>
+                      <span className="example-text">{ex.text}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <select
-                  value={language}
-                  onChange={(e) => setLanguage(e.target.value)}
-                  className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white/70 appearance-none cursor-pointer hover:bg-white/10 transition-colors"
-                >
-                  <option value="en">English</option>
-                  <option value="bn">বাংলা</option>
-                </select>
-              </div>
-            </div>
-          </header>
-
-          {/* Messages */}
-          <main className="flex-1 overflow-y-auto">
-            <div className="max-w-4xl mx-auto px-4 py-6 space-y-4">
-              {messages.length === 0 && (
-                <div className="text-center py-16">
-                  <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-green-500/20 to-blue-600/20 flex items-center justify-center border border-white/5">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-green-400">
-                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                    </svg>
+            ) : (
+              <div className="msg-list">
+                {messages.map(msg => <MessageBubble key={msg.id} message={msg} />)}
+                {loading && (
+                  <div className="loading-bubble animate-slide-up">
+                    <div className="loading-inner">
+                      <div className="dot" /><div className="dot" /><div className="dot" />
+                      <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:4 }}>Analyzing…</span>
+                    </div>
                   </div>
-                  <h2 className="text-lg font-semibold mb-1">Try the Toxicity Engine</h2>
-                  <p className="text-sm text-white/40 max-w-md mx-auto mb-8">
-                    Type anything to test real-time toxicity detection. The engine analyzes text for profanity, obfuscation bypasses, and offensive content.
-                  </p>
+                )}
+                <div ref={bottomRef} />
+              </div>
+            )}
+          </div>
 
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-w-2xl mx-auto">
-                    {EXAMPLES.map((ex, i) => (
-                      <button
-                        key={i}
-                        onClick={() => handleSend(ex.text, ex.lang)}
-                        className="glass rounded-xl px-3 py-2.5 text-left hover:bg-white/5 transition-all group"
-                      >
-                        <span className="text-[10px] text-white/30 uppercase tracking-wider block mb-1">{ex.label}</span>
-                        <span className="text-xs text-white/60 group-hover:text-white/90 transition-colors line-clamp-2">
-                          {ex.text}
-                        </span>
-                      </button>
+          {/* Input */}
+          <div className="input-footer">
+            <div className="input-inner">
+              <div className="input-box">
+                <textarea
+                  id="main-input"
+                  ref={textareaRef}
+                  value={input}
+                  onChange={e => { setInput(e.target.value); e.target.style.height='22px'; e.target.style.height=Math.min(e.target.scrollHeight,120)+'px'; }}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Type to test toxicity detection…"
+                  rows={1}
+                  className="input-textarea"
+                  maxLength={2000}
+                  autoFocus
+                />
+                <button id="send-btn" className="send-btn" onClick={() => handleSend()} disabled={!input.trim() || loading}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13"/>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                  </svg>
+                </button>
+              </div>
+              <RealtimePreview text={input} language={language} threshold={threshold} />
+              <p className="input-hint">Enter to send · Shift+Enter for new line · {2000 - input.length} chars remaining</p>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    // ─── Stats Panel ──────────────────────────────────────────────────────────
+    function StatsPanel() {
+      const [stats, setStats] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+
+      const load = useCallback(async () => {
+        setLoading(true); setError(null);
+        try { setStats(await apiStats()); }
+        catch (e) { setError(e.message); }
+        finally { setLoading(false); }
+      }, []);
+
+      useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, [load]);
+
+      if (loading && !stats) return (
+        <div style={{ padding:32, textAlign:'center', color:'var(--text-muted)' }}>Loading stats…</div>
+      );
+      if (error) return (
+        <div style={{ padding:32, textAlign:'center', color:'var(--red)' }}>{error}</div>
+      );
+
+      const engines = stats?.engines || {};
+
+      return (
+        <div className="scroll-panel" style={{ padding:16 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+            <h3 style={{ fontSize:13, fontWeight:700 }}>Engine Statistics</h3>
+            <button className="btn btn-ghost" style={{ fontSize:11 }} onClick={load}>Refresh</button>
+          </div>
+
+          {Object.entries(engines).map(([code, s]) => (
+            <div key={code} style={{ marginBottom:20 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                <span style={{ fontSize:12, fontWeight:700, textTransform:'uppercase', color:'var(--blue)' }}>{code}</span>
+                <span style={{ fontSize:11, color:'var(--text-muted)' }}>{s.language_name}</span>
+                <span className="badge" style={{ color:'var(--text-muted)', background:'var(--bg-600)', borderColor:'var(--border)', marginLeft:'auto' }}>
+                  {s.vocabulary_size} words
+                </span>
+              </div>
+              <div className="stats-grid">
+                <div className="stat-card">
+                  <div className="stat-value">{s.total_analyzed}</div>
+                  <div className="stat-label">Total analyzed</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-value" style={{ color:'var(--red)' }}>{s.total_toxic}</div>
+                  <div className="stat-label">Toxic detected</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-value" style={{ color:'var(--yellow)' }}>
+                    {(s.detection_rate * 100).toFixed(1)}%
+                  </div>
+                  <div className="stat-label">Detection rate</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-value mono" style={{ fontSize:20, color:'var(--green)' }}>
+                    {s.avg_latency_ms.toFixed(1)}ms
+                  </div>
+                  <div className="stat-label">Avg latency</div>
+                </div>
+              </div>
+
+              {/* Cache stats */}
+              {s.cache && (
+                <div style={{ marginTop:10, padding:'10px 14px', background:'var(--bg-700)', borderRadius:var_radius, border:'1px solid var(--border)' }}>
+                  <span className="label">LRU Cache</span>
+                  <div style={{ display:'flex', gap:16, marginTop:6 }}>
+                    {[
+                      ['Size', `${s.cache.size}/${s.cache.capacity}`],
+                      ['Hits', s.cache.hits],
+                      ['Misses', s.cache.misses],
+                      ['Hit Rate', `${(s.cache.hit_rate*100).toFixed(1)}%`],
+                    ].map(([label, val]) => (
+                      <div key={label}>
+                        <div className="mono" style={{ fontSize:13, fontWeight:700 }}>{val}</div>
+                        <div style={{ fontSize:10, color:'var(--text-muted)' }}>{label}</div>
+                      </div>
                     ))}
                   </div>
                 </div>
               )}
+            </div>
+          ))}
+        </div>
+      );
+    }
 
-              {messages.map(msg => (
-                <MessageBubble key={msg.id} message={msg} />
-              ))}
+    // ─── Batch Panel ──────────────────────────────────────────────────────────
+    function BatchPanel({ language, threshold }) {
+      const [input, setInput] = useState('');
+      const [results, setResults] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [summary, setSummary] = useState(null);
 
-              {loading && (
-                <div className="flex justify-start message-enter">
-                  <div className="glass rounded-2xl rounded-bl-md px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="flex gap-1">
-                        <span className="w-1.5 h-1.5 bg-green-400 rounded-full pulse-dot" style={{ animationDelay: '0ms' }} />
-                        <span className="w-1.5 h-1.5 bg-green-400 rounded-full pulse-dot" style={{ animationDelay: '200ms' }} />
-                        <span className="w-1.5 h-1.5 bg-green-400 rounded-full pulse-dot" style={{ animationDelay: '400ms' }} />
-                      </div>
-                      <span className="text-xs text-white/30">Analyzing...</span>
-                    </div>
-                  </div>
+      const handleBatch = async () => {
+        const lines = input.split('\n').map(l => l.trim()).filter(Boolean);
+        if (!lines.length) return;
+        setLoading(true); setError(null); setResults(null); setSummary(null);
+        try {
+          const data = await apiBatch(lines, language, threshold);
+          setResults(data.results);
+          setSummary({ total: data.total, toxic: data.toxic_count, latency: data.latency_ms });
+        } catch (e) { setError(e.message); }
+        finally { setLoading(false); }
+      };
+
+      const exportBatch = () => {
+        if (!results) return;
+        const blob = new Blob([JSON.stringify(results, null, 2)], { type:'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `lpte-batch-${Date.now()}.json`;
+        a.click(); URL.revokeObjectURL(url);
+      };
+
+      const lines = input.split('\n').filter(l => l.trim()).length;
+
+      return (
+        <div className="scroll-panel" style={{ padding:16 }}>
+          <p style={{ fontSize:12, color:'var(--text-muted)', marginBottom:10 }}>
+            Enter one text per line (max 50). All texts are analyzed against the current language and threshold.
+          </p>
+          <textarea
+            id="batch-input"
+            className="batch-textarea"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            placeholder={"Hello world\nf4ck this sh1t\nআমি বাংলায় কথা বলি\nkys loser"}
+          />
+          <div style={{ display:'flex', gap:8, marginTop:8, alignItems:'center' }}>
+            <button id="batch-analyze-btn" className="btn btn-primary" onClick={handleBatch} disabled={loading || !input.trim()}>
+              {loading ? 'Analyzing…' : `Analyze ${lines > 0 ? lines + ' texts' : ''}`}
+            </button>
+            {results && (
+              <button className="btn btn-ghost" onClick={exportBatch}>Export JSON</button>
+            )}
+            {summary && (
+              <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:'auto' }}>
+                {summary.toxic}/{summary.total} toxic · {summary.latency}ms
+              </span>
+            )}
+          </div>
+
+          {error && (
+            <div style={{ padding:10, background:'var(--red-dim)', border:'1px solid rgba(255,69,96,0.25)', borderRadius:8, marginTop:10, fontSize:12, color:'var(--red)' }}>
+              {error}
+            </div>
+          )}
+
+          {results && (
+            <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:14 }}>
+              {results.map((r, i) => (
+                <div key={i} className={`batch-result-row ${r.is_toxic ? 'toxic' : 'clean'}`}>
+                  <div style={{ width:6, height:6, borderRadius:'50%', flexShrink:0, background: r.is_toxic ? 'var(--red)' : 'var(--green)' }} />
+                  <span className="mono" style={{ fontSize:11, color:'var(--text-muted)', width:24, textAlign:'right', flexShrink:0 }}>{i+1}</span>
+                  <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:12 }}>
+                    {r.sanitized || '—'}
+                  </span>
+                  <SeverityBadge severity={r.severity} />
+                  <span className="mono" style={{ fontSize:10, color:'var(--text-muted)', flexShrink:0 }}>
+                    {(r.confidence*100).toFixed(0)}%
+                  </span>
                 </div>
-              )}
-
-              <div ref={messagesEndRef} />
+              ))}
             </div>
-          </main>
+          )}
+        </div>
+      );
+    }
 
-          {/* Input */}
-          <footer className="border-t border-white/5 bg-dark-800/80 backdrop-blur-xl sticky bottom-0">
-            <div className="max-w-4xl mx-auto px-4 py-3">
-              <div className="flex items-end gap-2 glass rounded-2xl px-3 py-2">
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Type a message to test toxicity detection..."
-                  rows={1}
-                  className="flex-1 bg-transparent text-sm text-white placeholder-white/25 resize-none py-1.5 max-h-32"
-                  style={{ minHeight: '24px' }}
-                  onInput={(e) => {
-                    e.target.style.height = '24px';
-                    e.target.style.height = Math.min(e.target.scrollHeight, 128) + 'px';
-                  }}
-                />
-                <button
-                  onClick={() => handleSend()}
-                  disabled={!input.trim() || loading}
-                  className="w-9 h-9 rounded-xl bg-gradient-to-r from-green-500 to-blue-600 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:scale-105 transition-transform flex-shrink-0"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="22" y1="2" x2="11" y2="13" />
-                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                  </svg>
-                </button>
+    // ─── Root App ─────────────────────────────────────────────────────────────
+    const var_radius = 'var(--radius)';
+
+    function App() {
+      const [tab, setTab] = useState('chat');
+      const [language, setLanguage] = useState('en');
+      const [threshold, setThreshold] = useState(0.6);
+
+      const tabs = [
+        { id:'chat',  label:'💬 Chat' },
+        { id:'batch', label:'📋 Batch' },
+        { id:'stats', label:'📊 Stats' },
+      ];
+
+      return (
+        <div id="app" style={{ height:'100vh', display:'flex', flexDirection:'column', background:'var(--bg-900)' }}>
+
+          {/* Header */}
+          <header className="app-header">
+            <div className="header-inner">
+              <div className="logo-badge">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
               </div>
-              <p className="text-[10px] text-white/20 text-center mt-2">
-                Press Enter to send &middot; Shift+Enter for new line &middot; Powered by LPTE v1.0.0
-              </p>
+              <div>
+                <div className="header-title">LPTE</div>
+                <div className="header-sub">Local Profanity & Toxicity Engine v1.1</div>
+              </div>
+              <div className="header-controls">
+                {/* Language selector */}
+                <select id="lang-select" value={language} onChange={e => setLanguage(e.target.value)}>
+                  <option value="en">🇬🇧 English</option>
+                  <option value="bn">🇧🇩 বাংলা</option>
+                  <option value="es">🇪🇸 Español</option>
+                  <option value="hi">🇮🇳 हिंदी</option>
+                </select>
+                {/* Threshold */}
+                <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  <span style={{ fontSize:11, color:'var(--text-muted)', whiteSpace:'nowrap' }}>
+                    Threshold: <span className="mono" style={{ color:'var(--blue)' }}>{threshold.toFixed(1)}</span>
+                  </span>
+                  <input
+                    id="threshold-slider"
+                    type="range"
+                    min="0.3" max="0.9" step="0.05"
+                    value={threshold}
+                    onChange={e => setThreshold(parseFloat(e.target.value))}
+                    title="Detection threshold"
+                  />
+                </div>
+              </div>
             </div>
-          </footer>
+          </header>
+
+          {/* Tab Bar */}
+          <div className="tab-bar">
+            {tabs.map(t => (
+              <button key={t.id} id={`tab-${t.id}`} className={`tab${tab===t.id?' active':''}`} onClick={() => setTab(t.id)}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Panel */}
+          <div className="app-body">
+            {tab === 'chat'  && <ChatPanel  language={language} threshold={threshold} />}
+            {tab === 'batch' && <BatchPanel language={language} threshold={threshold} />}
+            {tab === 'stats' && <StatsPanel />}
+          </div>
         </div>
       );
     }

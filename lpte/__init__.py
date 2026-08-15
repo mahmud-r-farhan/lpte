@@ -10,8 +10,9 @@ from lpte.core.normalizer import TextNormalizer
 from lpte.core.tokenizer import Tokenizer, TokenizationResult
 from lpte.core.profile import LanguageProfile
 from lpte.core.loader import LanguagePackLoader
+from lpte.core.cache import LRUCache
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __all__ = [
     "LpteEngine",
     "ClassificationResult",
@@ -21,4 +22,5 @@ __all__ = [
     "TokenizationResult",
     "LanguageProfile",
     "LanguagePackLoader",
+    "LRUCache",
 ]

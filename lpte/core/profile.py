@@ -5,6 +5,7 @@ Each language provides:
 - A set of known profanity root words
 - A stemmer for suffix stripping
 - Optional context rules for ambiguity resolution
+- Optional metadata (version, description, author)
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ class LanguageProfile:
     2. bad_words: set of known profanity root forms
     3. stemmer: language-specific Stemmer implementation
     4. Optional context_rules for disambiguation
+    5. Optional metadata fields: version, description, author
     """
 
     language_code: str
@@ -32,3 +34,7 @@ class LanguageProfile:
     stemmer: Stemmer
     context_rules: dict[str, set[str]] = field(default_factory=dict)
     min_word_length: int = 2
+    # Optional metadata
+    version: str = "1.0.0"
+    description: str = ""
+    author: str = ""

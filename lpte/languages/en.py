@@ -14,6 +14,7 @@ class EnglishStemmer(Stemmer):
     - Progressive: -ing
     - Comparative: -er, -est
     - Derivational: -tion, -ness, -ment, -able
+    - Double-consonant forms: -pping → -p (e.g., shitting → shit)
 
     Lightweight — prioritizes recall (catching all toxic forms) over precision.
     """
@@ -32,12 +33,15 @@ class EnglishStemmer(Stemmer):
             "ly", "er", "est",
             # Plurals and past
             "sses", "shes", "ches", "xes", "zes",
-            "ies", "ves",
+            "ves",
             "ed", "es", "s",
         ],
         key=len,
         reverse=True,
     )
+
+    # Doubled consonants that may appear before -ing/-ed (e.g., fucking → fuck)
+    _DOUBLE_CONSONANTS = set("bcdfghjklmnpqrstvwxyz")
 
     MIN_STEM_LENGTH = 3
 
@@ -51,26 +55,53 @@ class EnglishStemmer(Stemmer):
                 # Restore 'y' after dropping 'ied'/'ies'
                 if suffix in ("ied", "ies"):
                     return stemmed + "y"
+                # Handle doubled consonant before -ing/-ed (e.g., "shitting" → "shit")
+                if (
+                    suffix in ("ing", "ed")
+                    and len(stemmed) >= 2
+                    and stemmed[-1] == stemmed[-2]
+                    and stemmed[-1] in self._DOUBLE_CONSONANTS
+                ):
+                    return stemmed[:-1]
                 return stemmed
 
         return word
 
 
-# English profanity dictionary — root forms
+# ─── English Profanity Dictionary ─────────────────────────────────────────────
+# Root forms only — inflections are handled by the stemmer.
 _ENGLISH_BAD_WORDS: set[str] = {
-    # General profanity
+    # ── General profanity ──────────────────────────────────────────────────────
     "fuck", "shit", "ass", "asshole", "bastard", "damn",
     "hell", "crap", "piss", "dick", "cock", "pussy", "tits",
-    # Slurs — racial/ethnic
+    "bitch", "whore", "slut", "cunt", "twat", "wank", "wanker",
+    "arse", "bollocks", "bugger", "prick", "tosser", "idiot",
+    "moron", "imbecile", "dumbass", "dumbfuck", "fuckface",
+    "fuckwit", "dipshit", "jackass", "shithead", "asshat",
+    "numbskull", "douchebag", "douche",
+
+    # ── Slurs — racial/ethnic ──────────────────────────────────────────────────
     "nigger", "nigga", "spic", "chink", "kike", "wetback",
-    "cracker", "honky", "gook", "towelhead",
-    # Slurs — gender/sexuality
+    "cracker", "honky", "gook", "towelhead", "sandnigger",
+    "beaner", "redskin", "raghead", "zipperhead", "coon",
+    "darkie", "jungle bunny", "porch monkey",
+
+    # ── Slurs — gender/sexuality ───────────────────────────────────────────────
     "faggot", "fag", "dyke", "homo", "queer",
-    "tranny", "shemale",
-    # Slurs — disability
-    "retard", "retarded", "cripple", "spastic",
-    # Severe
-    "motherfucker", "cocksucker", "bullshit",
+    "tranny", "shemale", "ladyboy",
+
+    # ── Slurs — disability ────────────────────────────────────────────────────
+    "retard", "retarded", "cripple", "spastic", "tard",
+    "moron", "idiot", "imbecile",
+
+    # ── Severe / compound ─────────────────────────────────────────────────────
+    "motherfucker", "cocksucker", "bullshit", "horseshit",
+    "clusterfuck", "mindfuck", "fuckup", "shitfaced",
+    "shitstorm", "asswipe", "butthead",
+
+    # ── Threats / harassment ──────────────────────────────────────────────────
+    "kill yourself", "kys", "go die", "kill", "murder",
+    "rape", "rapist", "pedophile", "pedo", "groomer",
 }
 
 EnglishProfile = LanguageProfile(
@@ -79,8 +110,18 @@ EnglishProfile = LanguageProfile(
     bad_words=_ENGLISH_BAD_WORDS,
     stemmer=EnglishStemmer(),
     context_rules={
-        "ass": {"class", "grass", "bass", "brass", "mass", "pass"},
-        "hell": {"hello", "shell", "hellen", "helo"},
+        "ass":    {"class", "grass", "bass", "brass", "mass", "pass", "lass", "sass", "crass"},
+        "hell":   {"hello", "shell", "hellen", "helo", "dwell", "belle"},
+        "dick":   {"dickens", "richard", "dictionary"},
+        "cock":   {"cockney", "peacock", "cockatoo", "cockerel", "hancock"},
+        "prick":  {"prickle", "lipstick"},
+        "crap":   {"crapper", "crappy"},
+        "bitch":  {"bitchy"},
+        "queer":  {"queerly"},
+        "kys":    set(),   # no safe variants — always flag
     },
     min_word_length=2,
+    version="1.1.0",
+    description="English profanity and toxicity word list with stemmer",
+    author="LPTE Contributors",
 )
