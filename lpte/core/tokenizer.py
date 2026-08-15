@@ -23,14 +23,17 @@ class TokenizationResult:
     raw_normalized: str
 
 
-def _is_cjk_char(c: str) -> bool:
-    """Check if character is a CJK ideograph."""
+def _is_cjk_or_kana(c: str) -> bool:
+    """Check if character is a CJK ideograph, Hiragana, or Katakana."""
     code = ord(c)
     return (
-        0x4E00 <= code <= 0x9FFF   # CJK Unified Ideographs
+        0x4E00 <= code <= 0x9FFF     # CJK Unified Ideographs
+        or 0x3040 <= code <= 0x309F  # Hiragana
+        or 0x30A0 <= code <= 0x30FF  # Katakana
+        or 0x31F0 <= code <= 0x31FF  # Katakana Phonetic Extensions
         or 0x3400 <= code <= 0x4DBF  # CJK Unified Ideographs Extension A
-        or 0x20000 <= code <= 0x2A6DF # Extension B
         or 0xF900 <= code <= 0xFAFF  # CJK Compatibility Ideographs
+        or 0x20000 <= code <= 0x2A6DF # Extension B
     )
 
 
@@ -50,9 +53,9 @@ class Tokenizer:
         base_words = self._split_words(normalized_text)
         words = list(base_words)
 
-        # For CJK ideograms without spaces, generate character and n-gram tokens
+        # For unspaced East Asian scripts (CJK/Kana), generate sub-phrase & n-gram tokens
         for w in base_words:
-            if any(_is_cjk_char(c) for c in w):
+            if any(_is_cjk_or_kana(c) for c in w):
                 for n in range(1, min(len(w) + 1, 6)):
                     for i in range(len(w) - n + 1):
                         gram = w[i : i + n]

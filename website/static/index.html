@@ -516,6 +516,10 @@
       { text: "আমি বাংলায় কথা বলি",                lang: "bn", label: "Clean Bengali" },
       { text: "草泥马 傻逼",                         lang: "zh", label: "Chinese profanity" },
       { text: "你好，今天天气真好",                 lang: "zh", label: "Clean Chinese" },
+      { text: "死ね くそ野郎",                       lang: "ja", label: "Japanese profanity" },
+      { text: "こんにちは 今日は良い天気ですね",     lang: "ja", label: "Clean Japanese" },
+      { text: "씨발 개새끼 닥쳐라",                  lang: "ko", label: "Korean profanity" },
+      { text: "안녕하세요 오늘 날씨가 참 좋네요",   lang: "ko", label: "Clean Korean" },
       { text: "сука блять",                          lang: "ru", label: "Russian Mat" },
       { text: "Привет как твои дела",                lang: "ru", label: "Clean Russian" },
       { text: "chinga tu madre pendejo",             lang: "es", label: "Spanish profanity" },
@@ -1061,14 +1065,16 @@
                 {/* Language selector */}
                 <select id="lang-select" value={language} onChange={e => setLanguage(e.target.value)}>
                   <option value="en">🇬🇧 English</option>
-                  <option value="bn">🇧🇩 বাংলা</option>
+                  <option value="bn">🇧🇩 বাংলা (Bengali)</option>
                   <option value="zh">🇨🇳 中文 (Chinese)</option>
+                  <option value="ja">🇯🇵 日本語 (Japanese)</option>
+                  <option value="ko">🇰🇷 한국어 (Korean)</option>
                   <option value="ru">🇷🇺 Русский (Russian)</option>
                   <option value="es">🇪🇸 Español</option>
-                  <option value="hi">🇮🇳 हिन्दी</option>
+                  <option value="hi">🇮🇳 हिन्दी (Hindi)</option>
                   <option value="fr">🇫🇷 Français</option>
                   <option value="de">🇩🇪 Deutsch</option>
-                  <option value="ar">🇸🇦 العربية</option>
+                  <option value="ar">🇸🇦 العربية (Arabic)</option>
                 </select>
                 {/* Threshold */}
                 <div style={{ display:'flex', alignItems:'center', gap:6 }}>

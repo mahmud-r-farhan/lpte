@@ -8,9 +8,9 @@ LPTE is an open-source Python library for detecting and filtering toxic, profane
 
 - **100% Offline** — No network calls, no cloud APIs, no data leaving the device
 - **<25ms Latency** — Sub-25ms per text string evaluation with built-in LRU caching
-- **9 Built-in Languages** — English, Bengali, Chinese, Russian, Spanish, Hindi, French, German, Arabic
+- **11 Built-in Languages** — English, Bengali, Chinese, Japanese, Korean, Russian, Spanish, Hindi, French, German, Arabic
 - **Bypass-Resistant** — Catches leetspeak, character insertion, zero-width chars, homoglyphs, word splitting
-- **Stemming** — Language-aware suffix and particle stripping across Latin, Cyrillic, Devanagari, Bengali, Arabic, and CJK
+- **Stemming** — Language-aware suffix, particle, and affix stripping across Latin, Cyrillic, Devanagari, Bengali, Arabic, Hangul, Kana, and CJK
 - **Batch & HTML Support** — Process batches or raw HTML directly with tag stripping
 - **Zero Dependencies** — Pure Python, no external packages required
 - **Pluggable Architecture** — Drop in a JSON language file, no code changes needed
@@ -22,6 +22,8 @@ LPTE is an open-source Python library for detecting and filtering toxic, profane
 | `en` | English | English | `EnglishProfile` | `en_profile.json` | Suffix stemmer |
 | `bn` | Bengali | বাংলা | `BengaliProfile` | `bn_profile.json` | Inflection stemmer |
 | `zh` | Chinese | 中文 | `ChineseProfile` | `zh_profile.json` | Particle stemmer |
+| `ja` | Japanese | 日本語 | `JapaneseProfile` | `ja_profile.json` | Particle & polite stemmer |
+| `ko` | Korean | 한국어 | `KoreanProfile` | `ko_profile.json` | Josa & Eomi stemmer |
 | `ru` | Russian | Русский | `RussianProfile` | `ru_profile.json` | Cyrillic stemmer |
 | `es` | Spanish | Español | `SpanishProfile` | `es_profile.json` | Suffix stemmer |
 | `hi` | Hindi | हिन्दी | `HindiProfile` | `hi_profile.json` | Devanagari stemmer |

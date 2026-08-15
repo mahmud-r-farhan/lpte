@@ -69,10 +69,21 @@ def _edit_distance_1(s: str, t: str) -> bool:
     return True
 
 
-def _is_context_clean(word: str, bad_word: str, context_rules: dict[str, set[str]]) -> bool:
-    """Check if a word is a known clean variant of a bad word (context rule)."""
+def _is_context_clean(
+    word: str,
+    bad_word: str,
+    context_rules: dict[str, set[str]],
+    raw_text: str = "",
+) -> bool:
+    """Check if a word is a known clean variant or inside a clean compound word."""
     clean_words = context_rules.get(bad_word, set())
-    return word in clean_words
+    if not clean_words:
+        return False
+    if word in clean_words:
+        return True
+    if raw_text and any(clean in raw_text for clean in clean_words):
+        return True
+    return False
 
 
 # ─── Classifier ───────────────────────────────────────────────────────────────
@@ -98,6 +109,7 @@ class Classifier:
         bad_words = profile.bad_words
         min_len = profile.min_word_length
         context_rules = profile.context_rules
+        raw_text = tokens.raw_normalized
 
         # Filter words by min_word_length for exact/stemmed matching
         words = [w for w in tokens.words if len(w) >= min_len]
@@ -110,13 +122,13 @@ class Classifier:
             stemmed = profile.stemmer.stem(word)
 
             if word in bad_words:
-                if not _is_context_clean(word, word, context_rules):
+                if not _is_context_clean(word, word, context_rules, raw_text):
                     matched_terms.append(word)
                     signals["exact_match"] += 1
                     continue
 
             if stemmed != word and stemmed in bad_words:
-                if not _is_context_clean(word, stemmed, context_rules):
+                if not _is_context_clean(word, stemmed, context_rules, raw_text):
                     matched_terms.append(stemmed)
                     signals["stemmed_match"] += 1
 
@@ -128,16 +140,19 @@ class Classifier:
                 # Check the raw n-gram and its stemmed components
                 ngram_joined = ngram.replace(" ", "")
                 if ngram in bad_words or ngram_joined in bad_words:
-                    matched_terms.append(ngram)
-                    signals["phrase_match"] += 1
-                    break
+                    matched_bad = ngram if ngram in bad_words else ngram_joined
+                    if not _is_context_clean(ngram, matched_bad, context_rules, raw_text):
+                        matched_terms.append(ngram)
+                        signals["phrase_match"] += 1
+                        break
                 # Also try stemming each word in the n-gram
                 ngram_words = ngram.split()
                 stemmed_ngram = " ".join(profile.stemmer.stem(w) for w in ngram_words)
                 if stemmed_ngram in bad_words:
-                    matched_terms.append(stemmed_ngram)
-                    signals["phrase_match"] += 1
-                    break
+                    if not _is_context_clean(ngram, stemmed_ngram, context_rules, raw_text):
+                        matched_terms.append(stemmed_ngram)
+                        signals["phrase_match"] += 1
+                        break
 
         # ── Signal 3: Concatenated-word detection ("f u c k" → "fuck") ─────────
         # Uses all_words (unfiltered) so single-char split words are included.
@@ -151,10 +166,11 @@ class Classifier:
                         concatenated = "".join(window)
                         for bad_word in bad_words:
                             if bad_word in concatenated:
-                                matched_terms.append(bad_word)
-                                signals["concat_match"] += 1
-                                found = True
-                                break
+                                if not _is_context_clean(concatenated, bad_word, context_rules, raw_text):
+                                    matched_terms.append(bad_word)
+                                    signals["concat_match"] += 1
+                                    found = True
+                                    break
                     if found:
                         break
                 if found:
@@ -171,7 +187,7 @@ class Classifier:
                     if len(bad_word) < 5:
                         continue
                     if abs(len(word) - len(bad_word)) <= 1 and _edit_distance_1(word, bad_word):
-                        if _is_context_clean(word, bad_word, context_rules):
+                        if _is_context_clean(word, bad_word, context_rules, raw_text):
                             continue
                         matched_terms.append(bad_word)
                         signals["fuzzy_match"] += 1

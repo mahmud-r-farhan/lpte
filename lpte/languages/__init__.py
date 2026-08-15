@@ -7,6 +7,8 @@ from lpte.languages.en import EnglishProfile, EnglishStemmer
 from lpte.languages.es import SpanishProfile, SpanishStemmer
 from lpte.languages.fr import FrenchProfile, FrenchStemmer
 from lpte.languages.hi import HindiProfile, HindiStemmer
+from lpte.languages.ja import JapaneseProfile, JapaneseStemmer
+from lpte.languages.ko import KoreanProfile, KoreanStemmer
 from lpte.languages.ru import RussianProfile, RussianStemmer
 from lpte.languages.zh import ChineseProfile, ChineseStemmer
 
@@ -27,6 +29,10 @@ __all__ = [
     "FrenchStemmer",
     "HindiProfile",
     "HindiStemmer",
+    "JapaneseProfile",
+    "JapaneseStemmer",
+    "KoreanProfile",
+    "KoreanStemmer",
     "RussianProfile",
     "RussianStemmer",
 ]
