@@ -1,0 +1,28 @@
+{
+    "language_code": "de",
+    "language_name": "Deutsch (German)",
+    "bad_words": [
+        "scheisse", "scheiss", "scheisser", "scheisskerl", "scheissdreck",
+        "arschloch", "arsch", "arschgeige", "arschgesicht",
+        "hurensohn", "hure", "nutte", "schlampe", "fotze",
+        "wichser", "wichsen", "wixer",
+        "miststuck", "drecksau", "schweinehund",
+        "fick", "ficken", "gefickt", "ficker", "fickfehler",
+        "verdammt", "vollidiot", "idiot", "spast", "spasti",
+        "depp", "deppen", "kretin", "honk", "penner",
+        "kanake", "neger", "schwuchtel", "tunte",
+        "missgeburt", "behindert"
+    ],
+    "context_rules": {},
+    "min_word_length": 2,
+    "suffix_rules": [
+        "keit", "heit", "ung", "schaft", "isch", "lich", "ig",
+        "enden", "endem", "ender", "endes", "ende",
+        "test", "ten", "tet", "tem", "ter", "tes",
+        "est", "ern", "erm", "ers", "eln",
+        "en", "er", "es", "st", "et", "em", "te", "e", "s"
+    ],
+    "version": "1.1.0",
+    "description": "German profanity and toxicity word list with inflectional suffixes",
+    "author": "LPTE Contributors"
+}

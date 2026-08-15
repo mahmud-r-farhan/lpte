@@ -24,15 +24,29 @@ if project_root not in sys.path:
 from lpte.core.engine import LpteEngine
 from lpte.core.classifier import Severity
 from lpte.core.loader import LanguagePackLoader
-from lpte.languages.en import EnglishProfile
+from lpte.languages.ar import ArabicProfile
 from lpte.languages.bn import BengaliProfile
+from lpte.languages.de import GermanProfile
+from lpte.languages.en import EnglishProfile
+from lpte.languages.es import SpanishProfile
+from lpte.languages.fr import FrenchProfile
+from lpte.languages.hi import HindiProfile
+from lpte.languages.ru import RussianProfile
+from lpte.languages.zh import ChineseProfile
 
 # ─── Engine Setup ─────────────────────────────────────────────────────────────
 
-# Built-in engines
+# Built-in engines for 9 major world languages
 engines: dict[str, LpteEngine] = {
     "en": LpteEngine(EnglishProfile, cache_size=512),
     "bn": LpteEngine(BengaliProfile, cache_size=512),
+    "es": LpteEngine(SpanishProfile, cache_size=512),
+    "hi": LpteEngine(HindiProfile, cache_size=512),
+    "fr": LpteEngine(FrenchProfile, cache_size=512),
+    "de": LpteEngine(GermanProfile, cache_size=512),
+    "ar": LpteEngine(ArabicProfile, cache_size=512),
+    "zh": LpteEngine(ChineseProfile, cache_size=512),
+    "ru": LpteEngine(RussianProfile, cache_size=512),
 }
 
 # Dynamically load any extra JSON language packs from the languages/ directory

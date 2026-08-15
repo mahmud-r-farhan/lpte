@@ -3,6 +3,7 @@ Tokenizer — segments normalized text into analyzable tokens.
 
 Supports:
 - Word-boundary splitting
+- CJK (Chinese, Japanese, Korean) sub-phrase and n-gram segmentation
 - Word-level n-gram generation (bigrams, trigrams)
 - Character-level n-gram generation for obfuscation detection
 """
@@ -22,6 +23,17 @@ class TokenizationResult:
     raw_normalized: str
 
 
+def _is_cjk_char(c: str) -> bool:
+    """Check if character is a CJK ideograph."""
+    code = ord(c)
+    return (
+        0x4E00 <= code <= 0x9FFF   # CJK Unified Ideographs
+        or 0x3400 <= code <= 0x4DBF  # CJK Unified Ideographs Extension A
+        or 0x20000 <= code <= 0x2A6DF # Extension B
+        or 0xF900 <= code <= 0xFAFF  # CJK Compatibility Ideographs
+    )
+
+
 class Tokenizer:
     """Splits normalized text into tokens and n-grams."""
 
@@ -35,9 +47,20 @@ class Tokenizer:
         Returns:
             TokenizationResult with words, bigrams, trigrams.
         """
-        words = self._split_words(normalized_text)
-        bigrams = self._generate_ngrams(words, 2)
-        trigrams = self._generate_ngrams(words, 3)
+        base_words = self._split_words(normalized_text)
+        words = list(base_words)
+
+        # For CJK ideograms without spaces, generate character and n-gram tokens
+        for w in base_words:
+            if any(_is_cjk_char(c) for c in w):
+                for n in range(1, min(len(w) + 1, 6)):
+                    for i in range(len(w) - n + 1):
+                        gram = w[i : i + n]
+                        if gram not in words:
+                            words.append(gram)
+
+        bigrams = self._generate_ngrams(base_words, 2)
+        trigrams = self._generate_ngrams(base_words, 3)
 
         return TokenizationResult(
             words=words,

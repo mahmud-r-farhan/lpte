@@ -4,20 +4,32 @@
     "bad_words": [
         "fuck", "shit", "ass", "asshole", "bastard", "damn",
         "hell", "crap", "piss", "dick", "cock", "pussy", "tits",
+        "bitch", "whore", "slut", "cunt", "twat", "wank", "wanker",
+        "arse", "bollocks", "bugger", "prick", "tosser", "idiot",
+        "moron", "imbecile", "dumbass", "dumbfuck", "fuckface",
+        "fuckwit", "dipshit", "jackass", "shithead", "asshat",
         "nigger", "nigga", "spic", "chink", "kike", "wetback",
         "faggot", "fag", "dyke", "homo", "queer", "tranny",
         "retard", "retarded", "cripple",
-        "motherfucker", "cocksucker", "bullshit"
+        "motherfucker", "cocksucker", "bullshit", "kys", "kill yourself"
     ],
     "context_rules": {
-        "ass": ["class", "grass", "bass", "brass", "mass", "pass"]
+        "ass": ["class", "grass", "bass", "brass", "mass", "pass"],
+        "hell": ["hello", "shell", "hellen", "helo"],
+        "dick": ["dickens", "richard", "dictionary"],
+        "cock": ["cockney", "peacock", "cockatoo"]
     },
     "min_word_length": 2,
     "suffix_rules": [
+        "ification", "fulness", "ousness", "iveness",
         "ation", "ition", "ness", "ment", "able", "ible",
         "tion", "sion", "ence", "ance",
+        "ating", "izing", "ifying", "ening",
         "ing", "ied", "ies",
         "ful", "less", "ous", "ive", "ly", "er", "est",
         "ed", "es", "s"
-    ]
+    ],
+    "version": "1.1.0",
+    "description": "Comprehensive English toxicity and profanity word list",
+    "author": "LPTE Contributors"
 }

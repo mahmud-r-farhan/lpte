@@ -4,13 +4,13 @@ Text normalization pipeline.
 Handles:
 - Unicode NFKC normalization
 - Zero-width / invisible character stripping (category-aware)
-- Homoglyph normalization (Cyrillic/Greek lookalikes → ASCII)
+- Homoglyph normalization (for mixed-script Latin obfuscation: fаck → fuck)
 - Leetspeak reversal (0→o, 1→i, @→a, $→s, etc.)
 - Dot/dash separator collapsing for single-char sequences (f.u.c.k → fuck)
 - Repeated character collapse
-- Accent/diacritic stripping
+- Combining accent stripping (Latin/European diacritics)
 - Case folding
-- Fast regex-based sanitization
+- Universal multilingual character preservation (supports Indic, Arabic, Cyrillic, CJK, Latin)
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ _LEET_ALTERNATIVES: dict[str, list[str]] = {
 }
 
 # ─── Homoglyph Map ────────────────────────────────────────────────────────────
-# Common Unicode homoglyphs that look identical to ASCII (Cyrillic, Greek, etc.)
+# Common Unicode homoglyphs used to obfuscate ASCII/Latin words
 _HOMOGLYPH_MAP: dict[str, str] = {
     # Cyrillic lookalikes
     "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "х": "x",
@@ -75,11 +75,8 @@ _FORMAT_CATEGORY = "Cf"
 
 # ─── Regex Patterns ───────────────────────────────────────────────────────────
 
-# Bengali Unicode block range
-_BENGALI_RANGE = (0x0980, 0x09FF)
-
-# Accent/diacritic pattern (combining marks)
-_ACCENT_RE = re.compile(
+# Latin combining accent pattern only (preserves Indic/Arabic combining marks)
+_LATIN_ACCENT_RE = re.compile(
     r"[\u0300-\u036f\u1AB0-\u1AFF\u1DC0-\u1DFF\u20D0-\u20FF\uFE20-\uFE2F]"
 )
 
@@ -87,14 +84,9 @@ _ACCENT_RE = re.compile(
 _REPEAT_3PLUS_RE = re.compile(r"(.)\1{2,}")  # 3+ → 2
 _REPEAT_2PLUS_RE = re.compile(r"(.)\1+")     # 2+ → 1 (aggressive)
 
-# Fast regex sanitizer: keeps ASCII letters/digits, Bengali block, spaces
-# Bengali block: \u0980-\u09FF
-_SANITIZE_RE = re.compile(r"[^a-zA-Z0-9\u0980-\u09FF ]")
-
 # Dot/dash separator pattern for single-char sequences:
 # Catches "f.u.c.k", "f-u-c-k", "f*u*c*k", "f_u_c_k"
-# Matches: (single-char)(separator)(single-char)(separator)... patterns
-_SEPARATOR_RE = re.compile(r"(?<=[a-zA-Z\u0980-\u09FF])[.\-_*,|/\\](?=[a-zA-Z\u0980-\u09FF])")
+_SEPARATOR_RE = re.compile(r"(?<=[a-zA-Z0-9])[.\-_*,|/\\](?=[a-zA-Z0-9])")
 
 
 class TextNormalizer:
@@ -110,12 +102,11 @@ class TextNormalizer:
         # 1. Strip zero-width / invisible characters
         result = self._strip_zero_width(result)
 
-        # 2. Homoglyph normalization (Cyrillic/Greek lookalikes → ASCII)
+        # 2. Homoglyph normalization (for mixed-script obfuscation only)
         result = self._apply_homoglyphs(result)
 
-        # 3. Unicode NFKD normalization + accent stripping
-        result = unicodedata.normalize("NFKD", result)
-        result = _ACCENT_RE.sub("", result)
+        # 3. Unicode NFC / Latin accent stripping
+        result = _LATIN_ACCENT_RE.sub("", result)
         result = unicodedata.normalize("NFC", result)
 
         # 4. Leetspeak reversal
@@ -127,8 +118,8 @@ class TextNormalizer:
         # 6. Collapse repeated characters (3+ → 2)
         result = _REPEAT_3PLUS_RE.sub(r"\1\1", result)
 
-        # 7. Sanitize via regex: keep letters, digits, Bengali, spaces
-        result = _SANITIZE_RE.sub(" ", result)
+        # 7. Multilingual sanitization: keep letters, digits, and combining marks
+        result = self._sanitize_multilingual(result)
 
         # 8. Lowercase
         result = result.lower()
@@ -170,13 +161,12 @@ class TextNormalizer:
                     variant = text
                     variant = self._strip_zero_width(variant)
                     variant = self._apply_homoglyphs(variant)
-                    variant = unicodedata.normalize("NFKD", variant)
-                    variant = _ACCENT_RE.sub("", variant)
+                    variant = _LATIN_ACCENT_RE.sub("", variant)
                     variant = unicodedata.normalize("NFC", variant)
                     variant = "".join(alt_map.get(c, c) for c in variant)
                     variant = self._strip_separators(variant)
                     variant = _REPEAT_3PLUS_RE.sub(r"\1\1", variant)
-                    variant = _SANITIZE_RE.sub(" ", variant).lower().strip()
+                    variant = self._sanitize_multilingual(variant).lower().strip()
                     variant = " ".join(variant.split())
                     if variant and variant not in variants:
                         variants.append(variant)
@@ -206,8 +196,20 @@ class TextNormalizer:
         return "".join(result)
 
     def _apply_homoglyphs(self, text: str) -> str:
-        """Replace known Unicode homoglyphs with their ASCII equivalents."""
-        return "".join(_HOMOGLYPH_MAP.get(c, c) for c in text)
+        """
+        Apply homoglyph mappings to words that mix Latin letters with lookalikes
+        (e.g., 'fаck' with Cyrillic 'а'). Avoids altering pure Cyrillic/Greek text.
+        """
+        words = text.split()
+        normalized_words = []
+        for w in words:
+            # Check if word has Latin characters alongside lookalikes
+            has_latin = any("a" <= c.lower() <= "z" for c in w)
+            has_fullwidth = any(0xFF00 <= ord(c) <= 0xFFEF for c in w)
+            if has_latin or has_fullwidth:
+                w = "".join(_HOMOGLYPH_MAP.get(c, c) for c in w)
+            normalized_words.append(w)
+        return " ".join(normalized_words)
 
     def _apply_leet_reversal(self, text: str) -> str:
         return "".join(_LEET_MAP.get(c, c) for c in text)
@@ -215,7 +217,20 @@ class TextNormalizer:
     def _strip_separators(self, text: str) -> str:
         """
         Remove punctuation separators between letters in single-char sequences.
-        e.g.: "f.u.c.k" → "fuck", "f-u-c-k" → "fuck"
-        Uses regex substitution — no inner-word separators are changed.
+        e.g.: 'f.u.c.k' → 'fuck', 'f-u-c-k' → 'fuck'
         """
         return _SEPARATOR_RE.sub("", text)
+
+    def _sanitize_multilingual(self, text: str) -> str:
+        """
+        Preserve letters (L), numbers (N), and combining marks (M) across all scripts.
+        Punctuation and non-word symbols are converted to spaces.
+        """
+        res = []
+        for c in text:
+            cat = unicodedata.category(c)
+            if cat[0] in ("L", "N", "M"):
+                res.append(c)
+            else:
+                res.append(" ")
+        return "".join(res)

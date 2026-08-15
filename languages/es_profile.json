@@ -2,15 +2,36 @@
     "language_code": "es",
     "language_name": "Español (Spanish)",
     "bad_words": [
-        "puta", "mierda", "joder", "coño", "pendejo",
-        "cabrón", "chinga", "estúpido", "idiota", "imbecil",
-        "maldito", "hijueputa", "marica", "maricón", "puto"
+        "puta", "puto", "putas", "putos", "puton", "putona",
+        "mierda", "mierdas", "mierdoso", "mierdosa",
+        "joder", "jodete", "jodido", "jodida", "jodidos",
+        "coño", "coños", "pendejo", "pendeja", "pendejos", "pendejas",
+        "cabron", "cabrona", "cabrones", "cabronas",
+        "chinga", "chingada", "chingado", "chingar", "chingados",
+        "estupido", "estupida", "estupidos", "estupidas",
+        "idiota", "idiotas", "imbecil", "imbeciles",
+        "maldito", "maldita", "malditos", "malditas",
+        "hijueputa", "hijadeputa", "hijodeputa", "hdp",
+        "marica", "maricon", "maricones", "culero", "culera",
+        "verga", "culo", "picha", "cipote", "gilipollas",
+        "mamaguevo", "mamabicho", "careverga", "gonorrea",
+        "zorra", "perra", "bastardo", "bastarda"
     ],
     "context_rules": {},
     "min_word_length": 2,
     "suffix_rules": [
-        "ción", "siones", "mente", "ado", "ida", "ando", "iendo",
-        "oso", "osa", "osos", "osas", "ito", "ita", "itos", "itas",
-        "es", "s", "é", "ía"
-    ]
+        "isimamente", "osamente", "icamente", "isimo", "isima", "isimos", "isimas",
+        "amiento", "imiento", "mente",
+        "aciones", "iciones", "acion", "icion", "idades", "idad",
+        "ciones", "siones", "cion", "sion",
+        "ando", "iendo", "yendo", "ado", "ido", "ada", "ida",
+        "ados", "idos", "adas", "idas",
+        "osos", "osas", "oso", "osa",
+        "itos", "itas", "ito", "ita",
+        "uelos", "uelas", "uelo", "uela",
+        "es", "s"
+    ],
+    "version": "1.1.0",
+    "description": "Spanish profanity and toxicity word list with inflectional suffixes",
+    "author": "LPTE Contributors"
 }

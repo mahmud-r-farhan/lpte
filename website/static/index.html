@@ -506,7 +506,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────
     const EXAMPLES = [
-      { text: "Hello, how are you today?",          lang: "en", label: "Clean message" },
+      { text: "Hello, how are you today?",          lang: "en", label: "English clean" },
       { text: "f4ck this bullsh1t",                  lang: "en", label: "Leetspeak bypass" },
       { text: "f.u.c.k you",                         lang: "en", label: "Dot separators" },
       { text: "f u c k off",                         lang: "en", label: "Word splitting" },
@@ -514,6 +514,14 @@
       { text: "the class assessment was great",      lang: "en", label: "False positive test" },
       { text: "কুত্তা",                              lang: "bn", label: "Bengali profanity" },
       { text: "আমি বাংলায় কথা বলি",                lang: "bn", label: "Clean Bengali" },
+      { text: "草泥马 傻逼",                         lang: "zh", label: "Chinese profanity" },
+      { text: "你好，今天天气真好",                 lang: "zh", label: "Clean Chinese" },
+      { text: "сука блять",                          lang: "ru", label: "Russian Mat" },
+      { text: "Привет как твои дела",                lang: "ru", label: "Clean Russian" },
+      { text: "chinga tu madre pendejo",             lang: "es", label: "Spanish profanity" },
+      { text: "मादरचोद कुत्ता",                      lang: "hi", label: "Hindi profanity" },
+      { text: "merde putain",                        lang: "fr", label: "French profanity" },
+      { text: "scheisse verdammtes arschloch",       lang: "de", label: "German profanity" },
     ];
 
     const SEVERITY_CONFIG = {
@@ -1054,8 +1062,13 @@
                 <select id="lang-select" value={language} onChange={e => setLanguage(e.target.value)}>
                   <option value="en">🇬🇧 English</option>
                   <option value="bn">🇧🇩 বাংলা</option>
+                  <option value="zh">🇨🇳 中文 (Chinese)</option>
+                  <option value="ru">🇷🇺 Русский (Russian)</option>
                   <option value="es">🇪🇸 Español</option>
-                  <option value="hi">🇮🇳 हिंदी</option>
+                  <option value="hi">🇮🇳 हिन्दी</option>
+                  <option value="fr">🇫🇷 Français</option>
+                  <option value="de">🇩🇪 Deutsch</option>
+                  <option value="ar">🇸🇦 العربية</option>
                 </select>
                 {/* Threshold */}
                 <div style={{ display:'flex', alignItems:'center', gap:6 }}>

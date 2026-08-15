@@ -7,12 +7,27 @@ LPTE is an open-source Python library for detecting and filtering toxic, profane
 ## Features
 
 - **100% Offline** — No network calls, no cloud APIs, no data leaving the device
-- **<25ms Latency** — Sub-25ms per text string evaluation
-- **Multi-Language** — Bengali and English packs included; add any language via JSON
-- **Bypass-Resistant** — Catches leetspeak, character insertion, zero-width chars, word splitting
-- **Stemming** — Language-aware suffix stripping for inflectional languages
+- **<25ms Latency** — Sub-25ms per text string evaluation with built-in LRU caching
+- **9 Built-in Languages** — English, Bengali, Chinese, Russian, Spanish, Hindi, French, German, Arabic
+- **Bypass-Resistant** — Catches leetspeak, character insertion, zero-width chars, homoglyphs, word splitting
+- **Stemming** — Language-aware suffix and particle stripping across Latin, Cyrillic, Devanagari, Bengali, Arabic, and CJK
+- **Batch & HTML Support** — Process batches or raw HTML directly with tag stripping
 - **Zero Dependencies** — Pure Python, no external packages required
 - **Pluggable Architecture** — Drop in a JSON language file, no code changes needed
+
+## Supported Languages
+
+| Code | Language | Native | Built-in Pack | JSON Pack | Stemmer |
+|------|----------|--------|---------------|-----------|---------|
+| `en` | English | English | `EnglishProfile` | `en_profile.json` | Suffix stemmer |
+| `bn` | Bengali | বাংলা | `BengaliProfile` | `bn_profile.json` | Inflection stemmer |
+| `zh` | Chinese | 中文 | `ChineseProfile` | `zh_profile.json` | Particle stemmer |
+| `ru` | Russian | Русский | `RussianProfile` | `ru_profile.json` | Cyrillic stemmer |
+| `es` | Spanish | Español | `SpanishProfile` | `es_profile.json` | Suffix stemmer |
+| `hi` | Hindi | हिन्दी | `HindiProfile` | `hi_profile.json` | Devanagari stemmer |
+| `fr` | French | Français | `FrenchProfile` | `fr_profile.json` | Suffix stemmer |
+| `de` | German | Deutsch | `GermanProfile` | `de_profile.json` | Suffix stemmer |
+| `ar` | Arabic | العربية | `ArabicProfile` | `ar_profile.json` | Affix stemmer |
 
 ## Platform Support
 
@@ -43,21 +58,30 @@ pip install lpte
 
 ```python
 from lpte import LpteEngine
-from lpte.languages import EnglishProfile
+from lpte.languages import EnglishProfile, ChineseProfile, RussianProfile, BengaliProfile
 
-engine = LpteEngine(EnglishProfile)
-
-# Analyze
-result = engine.analyze("some text here")
+# English
+engine_en = LpteEngine(EnglishProfile)
+result = engine_en.analyze("some text here")
 if result.is_toxic:
     print(f"Toxic: {result.severity.name} ({result.confidence:.2f})")
 
-# Quick check
-if engine.is_toxic("some text"):
-    print("Blocked!")
+# Chinese
+engine_zh = LpteEngine(ChineseProfile)
+result_zh = engine_zh.analyze("草泥马 傻逼")
+
+# Russian
+engine_ru = LpteEngine(RussianProfile)
+result_ru = engine_ru.analyze("сука блять")
+
+# Batch analysis
+results = engine_en.batch_analyze(["hello world", "you fucking idiot"])
+
+# HTML text analysis
+result = engine_en.analyze_html("<b>hello</b> f*ck")
 
 # Sanitize
-clean = engine.sanitize("you are a bastard")
+clean = engine_en.sanitize("you are a bastard")
 # → "you are a *******"
 ```
 
