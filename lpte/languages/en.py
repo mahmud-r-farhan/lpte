@@ -4,6 +4,32 @@ from lpte.core.profile import LanguageProfile
 from lpte.core.stemmer import Stemmer
 
 
+# Inanimate objects that make a "kill" phrase ordinary speech instead of a
+# threat. Used by EnglishProfile.benign_objects — see the note there.
+#
+# Two groups: technical targets (a sysadmin killing a process is not a threat)
+# and fixed idioms ("kill the mood", "kill time") that are among the most
+# frequent uses of the verb in ordinary English.
+_BENIGN_KILL_OBJECTS: set[str] = {
+    # ── Technical / systems ─────────────────────────────────────────────────
+    "process", "processes", "job", "jobs", "task", "tasks",
+    "thread", "threads", "service", "services", "daemon", "daemons",
+    "container", "containers", "pod", "pods", "instance", "instances",
+    "connection", "connections", "session", "sessions", "socket", "sockets",
+    "query", "queries", "request", "requests", "transaction", "transactions",
+    "server", "servers", "node", "nodes", "cluster", "worker", "workers",
+    "script", "scripts", "program", "programs", "app", "apps",
+    "browser", "tab", "tabs", "window", "windows", "build", "builds",
+    "pipeline", "timer", "timers", "listener", "listeners", "cron",
+    "crontab", "spooler", "printer", "machine", "vm", "vms",
+    "docker", "nginx", "apache", "mysql", "postgres", "redis", "kernel",
+    "loop", "loops", "threadpool", "subprocess", "subprocesses",
+    # ── Fixed idioms ────────────────────────────────────────────────────────
+    "mood", "vibe", "vibes", "buzz", "time", "boredom", "silence",
+    "battery", "deal", "joy", "fun", "spirit", "spirits", "competition",
+}
+
+
 class EnglishStemmer(Stemmer):
     """
     English language stemmer — simplified suffix stripping.
@@ -204,6 +230,22 @@ EnglishProfile = LanguageProfile(
             "garbage can", "garbage truck", "garbage bag",
             "garbage collection", "garbage disposal",
         },
+    },
+    # Objects that make a "kill" phrase ordinary speech rather than a threat.
+    #
+    # Why this exists: bare "kill" was removed from the vocabulary because it
+    # is everyday tech and gaming vocabulary, but "will kill" / "gonna kill" /
+    # "going to kill" are threat *phrases* — and they fire on "I will kill the
+    # process", which is a sysadmin doing their job. A phrase like that is only
+    # a threat when its target is a person, so this allowlist of inanimate
+    # objects (technical targets plus common idioms) suppresses those hits.
+    #
+    # It is deliberately narrow: anything not listed still flags, so the
+    # failure mode stays on the side of detection rather than silence.
+    benign_objects={
+        "will kill": _BENIGN_KILL_OBJECTS,
+        "gonna kill": _BENIGN_KILL_OBJECTS,
+        "going to kill": _BENIGN_KILL_OBJECTS,
     },
     min_word_length=2,
     version="1.1.0",

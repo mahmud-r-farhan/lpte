@@ -248,7 +248,7 @@ lpte/
 │   ├── dotnet/                # .NET/C# wrapper
 │   └── php/                   # PHP wrapper
 │
-├── tests/                     # 313 test cases
+├── tests/                     # 406 test cases
 ├── example/                   # Demo application
 ├── REAL_WORLD_USECASES.md     # Integration patterns, tuning, limitations
 └── ROADMAP.md                 # What's next
@@ -376,7 +376,7 @@ pytest --cov=lpte --cov-report=term-missing
 pytest tests/test_bypass_tricks.py -v
 ```
 
-The test suite covers **373 cases** across:
+The test suite covers **406 cases** across:
 - Bypass trick detection (leetspeak, zero-width, word splitting, etc.)
 - False positive prevention (clean words containing profanity substrings)
 - Context-rule correctness (benign compounds, unspaced-script compounds)
@@ -420,7 +420,7 @@ Run `lpte bench` to reproduce on your own hardware.
 
 ## Accuracy
 
-`lpte eval` runs a labelled corpus (151 cases across all 11 languages) and
+`lpte eval` runs a labelled corpus (174 cases across all 11 languages) and
 reports precision / recall / F1:
 
 ```bash
@@ -432,10 +432,10 @@ lpte eval --fail-under 0.90    # CI gate
 ```
 lang    total     acc    prec  recall      f1  FP/FN
 --------------------------------------------------------------
-en         53   1.000   1.000   1.000   1.000  0 FP / 0 FN
-bn         24   1.000   1.000   1.000   1.000  0 FP / 0 FN
+en         65   1.000   1.000   1.000   1.000  0 FP / 0 FN
+bn         35   1.000   1.000   1.000   1.000  0 FP / 0 FN
 ...
-ALL       151   1.000   1.000   1.000   1.000  0 FP / 0 FN
+ALL       174   1.000   1.000   1.000   1.000  0 FP / 0 FN
 ```
 
 **Read this honestly.** The corpus is small and high-signal, and the engine

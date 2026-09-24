@@ -153,3 +153,63 @@ class TestSentenceFinalPunctuation:
     ])
     def test_exclamation_on_clean_text_stays_clean(self, en, text):
         assert not en.analyze(text).is_toxic, text
+
+    @pytest.mark.parametrize("text", [
+        "I will kill the process",
+        "I'm going to kill the background job",
+        "this will kill all docker containers",
+        "this command will kill the session",
+        "the update will kill my old battery",
+        "I will kill time until the train comes",
+        "we gonna kill the mood",
+        "kill the job and clean the db",
+        "I will kill the process and then restart it",
+    ])
+    def test_kill_with_technical_or_idiomatic_object_is_clean(self, en, text):
+        assert not en.analyze(text).is_toxic, text
+
+
+class TestPhraseMatchingIsNotSuppressedBySingleWords:
+    """
+    A cheap single-word hit must never hide a multi-word threat.
+
+    Regression: the phrase signal used to sit behind `if not matched_terms:`
+    as a performance shortcut, so "you are such an idiot, go kill yourself"
+    scored HIGH/profanity on "idiot" alone while the CRITICAL threat sitting
+    one word later went unreported. The severity of a message is decided by
+    its worst part, and threats are where the real harm is.
+    """
+
+    def test_threat_still_detected_when_insult_matches_first(self, en):
+        result = en.analyze("you are such an idiot, go kill yourself")
+        assert result.severity.name == "CRITICAL"
+        assert "threat" in result.categories
+        assert "kill yourself" in result.matched_terms
+        assert "idiot" in result.matched_terms
+
+    @pytest.mark.parametrize("text", [
+        "you stupid bitch, im gonna kill you",
+        "you are dumb, I will kill you",
+        "hey loser, go die",
+    ])
+    def test_threat_phrase_survives_earlier_matches(self, en, text):
+        result = en.analyze(text)
+        assert "threat" in result.categories, text
+
+    def test_benign_object_does_not_hide_a_personal_target(self, en):
+        # "the process" is benign, but "and you" is a person: still a threat.
+        result = en.analyze("I will kill the process and you")
+        assert result.is_toxic
+        assert "threat" in result.categories
+
+    @pytest.mark.parametrize("text", [
+        "I will kill you",
+        "he is going to kill her",
+        "im gonna kill him",
+        "im going to kill you and your whole family",
+    ])
+    def test_real_threats_still_critical(self, en, text):
+        result = en.analyze(text)
+        assert result.is_toxic, text
+        assert "threat" in result.categories, text
+        assert result.severity.name == "CRITICAL", text

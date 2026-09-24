@@ -203,12 +203,33 @@ Stating these is part of making this usable in production.
 | **Romanized slang** — "chud" written as "chod" varies wildly | Recall gaps on transliterated abuse | Add local romanized variants to the pack |
 | **Sarcasm / negation** — "not bad" is not handled semantically | Occasional false positives | Keep thresholds conservative |
 | **Vocabulary drift** — new slang appears constantly | Recall decays over time | Quarterly pack review; JSON packs make this a data change, not a code change |
+| **Threats need a target** — "kill" with an inanimate object is ordinary speech | A sysadmin writing "I will kill the process" is blocked as violent | Benign-object allowlist per phrase; anything unlisted still flags, so the failure mode stays on the side of detection |
 | **No cross-lingual knowledge** — a slur in a language you haven't packed is invisible | Gaps for long-tail languages | Add a pack; `auto` mode runs all installed ones |
 
 **When to escalate beyond LPTE:** if you need to catch semantically abusive
 messages with **no** banned words ("women shouldn't be allowed to…"), keyword
 matching cannot help. Use LPTE as a cheap first-pass filter and send the
 residual to a classifier or human review.
+
+### Two failures worth internalising
+
+Both were found by writing tests against real chat, not by reasoning about the
+code, and both are the kind of bug that survives a demo:
+
+1. **A cheap match hiding an expensive one.** Multi-word phrases — where the
+   worst content lives ("kill yourself", "gonna kill you") — were skipped once
+   any single word had matched, as a performance shortcut. "you are such an
+   idiot, go kill yourself" therefore scored HIGH/profanity on "idiot" and
+   never noticed the CRITICAL threat next to it. **A message's severity is
+   decided by its worst part**, so the phrase signal now always runs. The
+   cheaper fallbacks (concatenation, fuzzy) stay gated; they add recall, not
+   severity.
+2. **A missing word is invisible.** `বোকাচোদা` — the most common piece of
+   abuse in Bengali chat — returned clean, because it is a compound that never
+   contains its root as a standalone token. Nobody reported it; it simply
+   never fired. This is why `lpte eval` exists and why the corpus is per
+   language: **a filter without a labelled corpus is a filter with unknown
+   blind spots.**
 
 ---
 
