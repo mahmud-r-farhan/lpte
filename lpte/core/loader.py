@@ -34,6 +34,9 @@ _REQUIRED_FIELDS = ("language_code", "language_name", "bad_words")
 
 def _validate_pack(data: dict[str, Any], source: str = "<unknown>") -> None:
     """Validate a language pack dict. Raises ValueError with helpful messages."""
+    if not isinstance(data, dict):
+        raise ValueError(f"Language pack '{source}' must be a dictionary object")
+
     missing = [f for f in _REQUIRED_FIELDS if f not in data]
     if missing:
         raise ValueError(
@@ -41,20 +44,26 @@ def _validate_pack(data: dict[str, Any], source: str = "<unknown>") -> None:
             f"Required: {list(_REQUIRED_FIELDS)}"
         )
 
-    if not isinstance(data["bad_words"], list):
+    if not isinstance(data["language_code"], str) or not data["language_code"].strip():
+        raise ValueError(
+            f"Language pack '{source}': 'language_code' must be a non-empty string"
+        )
+
+    if not isinstance(data["language_name"], str) or not data["language_name"].strip():
+        raise ValueError(
+            f"Language pack '{source}': 'language_name' must be a non-empty string"
+        )
+
+    if not isinstance(data["bad_words"], (list, set, tuple)):
         raise ValueError(
             f"Language pack '{source}': 'bad_words' must be a list of strings, "
             f"got {type(data['bad_words']).__name__}"
         )
 
-    if len(data["bad_words"]) == 0:
+    cleaned_words = [str(w).strip().lower() for w in data["bad_words"] if str(w).strip()]
+    if len(cleaned_words) == 0:
         raise ValueError(
-            f"Language pack '{source}': 'bad_words' must contain at least one entry"
-        )
-
-    if not isinstance(data["language_code"], str) or not data["language_code"].strip():
-        raise ValueError(
-            f"Language pack '{source}': 'language_code' must be a non-empty string"
+            f"Language pack '{source}': 'bad_words' must contain at least one non-empty string entry"
         )
 
     if "context_rules" in data and not isinstance(data["context_rules"], dict):
@@ -67,6 +76,12 @@ def _validate_pack(data: dict[str, Any], source: str = "<unknown>") -> None:
         raise ValueError(
             f"Language pack '{source}': 'word_categories' must be a dict, "
             f"got {type(data['word_categories']).__name__}"
+        )
+
+    if "suffix_rules" in data and not isinstance(data["suffix_rules"], (list, set, tuple)):
+        raise ValueError(
+            f"Language pack '{source}': 'suffix_rules' must be a list, "
+            f"got {type(data['suffix_rules']).__name__}"
         )
 
     if "min_word_length" in data:
@@ -83,8 +98,9 @@ class SuffixStripper(Stemmer):
     """Generic stemmer that strips a list of known suffixes."""
 
     def __init__(self, suffixes: list[str], min_stem_length: int = 2):
-        # Sort by length descending for greedy matching
-        self.suffixes = sorted(suffixes, key=len, reverse=True)
+        # Clean and sort by length descending for greedy matching
+        clean_suffixes = [str(s).strip() for s in suffixes if str(s).strip()]
+        self.suffixes = sorted(clean_suffixes, key=len, reverse=True)
         self.min_stem_length = min_stem_length
 
     def stem(self, word: str) -> str:
@@ -193,7 +209,7 @@ class LanguagePackLoader:
         profiles: dict[str, LanguageProfile] = {}
         for json_file in sorted(directory.glob("*_profile.json")):
             profile = LanguagePackLoader.load_file(json_file)
-            profiles[profile.language_code] = profile
+            profiles[profile.language_code.lower()] = profile
 
         return profiles
 
@@ -205,6 +221,10 @@ class LanguagePackLoader:
     ) -> LanguageProfile:
         _validate_pack(data, source)
 
+        bad_words = {
+            str(w).strip().lower() for w in data["bad_words"] if str(w).strip()
+        }
+
         suffixes = data.get("suffix_rules", [])
 
         if stemmer is None:
@@ -213,23 +233,28 @@ class LanguagePackLoader:
             else:
                 stemmer = _IdentityStemmer()
 
-        context_rules = {
-            k: set(v) for k, v in data.get("context_rules", {}).items()
-        }
+        context_rules = {}
+        if "context_rules" in data and isinstance(data["context_rules"], dict):
+            for k, v in data["context_rules"].items():
+                if isinstance(v, (list, set, tuple)):
+                    context_rules[str(k).strip().lower()] = {
+                        str(item).strip().lower() for item in v if str(item).strip()
+                    }
 
-        word_categories = {
-            str(k): str(v) for k, v in data.get("word_categories", {}).items()
-        }
+        word_categories = {}
+        if "word_categories" in data and isinstance(data["word_categories"], dict):
+            for k, v in data["word_categories"].items():
+                word_categories[str(k).strip().lower()] = str(v).strip().lower()
 
         return LanguageProfile(
-            language_code=data["language_code"],
-            language_name=data["language_name"],
-            bad_words=set(data["bad_words"]),
+            language_code=data["language_code"].strip().lower(),
+            language_name=data["language_name"].strip(),
+            bad_words=bad_words,
             stemmer=stemmer,
             context_rules=context_rules,
             min_word_length=data.get("min_word_length", 2),
             word_categories=word_categories,
-            version=data.get("version", "1.0.0"),
-            description=data.get("description", ""),
-            author=data.get("author", ""),
+            version=str(data.get("version", "1.0.0")),
+            description=str(data.get("description", "")),
+            author=str(data.get("author", "")),
         )

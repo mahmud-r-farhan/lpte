@@ -6,13 +6,13 @@ Visit: http://localhost:8000
 
 The demo exposes the same API surface an integrator would use in production:
 single analysis, batch analysis, sanitization, moderation-policy decisions,
-and pack introspection.
+pack introspection, and dynamic runtime language creation.
 """
 
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,58 +30,28 @@ from lpte.core.classifier import Severity
 from lpte.core.loader import LanguagePackLoader
 from lpte.core.multilang import MultiLangEngine
 from lpte.core.policy import POLICY_PRESETS, Action, ModerationPolicy, get_policy
-from lpte.languages.ar import ArabicProfile
-from lpte.languages.bn import BengaliProfile
-from lpte.languages.de import GermanProfile
-from lpte.languages.en import EnglishProfile
-from lpte.languages.es import SpanishProfile
-from lpte.languages.fr import FrenchProfile
-from lpte.languages.hi import HindiProfile
-from lpte.languages.ja import JapaneseProfile
-from lpte.languages.ko import KoreanProfile
-from lpte.languages.ru import RussianProfile
-from lpte.languages.zh import ChineseProfile
+from lpte.core.registry import LanguageRegistry, default_registry
 
 # ─── Engine Setup ─────────────────────────────────────────────────────────────
 
-# Built-in engines for 11 major world languages
+# Initialize engines from default registry (built-ins + directory packs)
 engines: dict[str, LpteEngine] = {
-    "en": LpteEngine(EnglishProfile, cache_size=512),
-    "bn": LpteEngine(BengaliProfile, cache_size=512),
-    "zh": LpteEngine(ChineseProfile, cache_size=512),
-    "ja": LpteEngine(JapaneseProfile, cache_size=512),
-    "ko": LpteEngine(KoreanProfile, cache_size=512),
-    "ru": LpteEngine(RussianProfile, cache_size=512),
-    "es": LpteEngine(SpanishProfile, cache_size=512),
-    "hi": LpteEngine(HindiProfile, cache_size=512),
-    "fr": LpteEngine(FrenchProfile, cache_size=512),
-    "de": LpteEngine(GermanProfile, cache_size=512),
-    "ar": LpteEngine(ArabicProfile, cache_size=512),
+    code: LpteEngine(profile, cache_size=512)
+    for code, profile in default_registry.get_all_profiles().items()
 }
 
 # Common code-switched pairs (e.g. Banglish "তুই একদম idiot", Hinglish).
 # Kept warm so mixed-script messages are analysed in a single request.
-multilang_engines: dict[str, MultiLangEngine] = {
-    "bn+en": MultiLangEngine([BengaliProfile, EnglishProfile], cache_size=256),
-    "hi+en": MultiLangEngine([HindiProfile, EnglishProfile], cache_size=256),
-    "auto": MultiLangEngine(
-        [EnglishProfile, BengaliProfile, HindiProfile, RussianProfile,
-         ChineseProfile, JapaneseProfile, KoreanProfile, SpanishProfile,
-         FrenchProfile, GermanProfile, ArabicProfile],
-        cache_size=256,
-    ),
-}
+multilang_engines: dict[str, MultiLangEngine] = {}
 
-# Dynamically load any extra JSON language packs from the languages/ directory
-_langs_dir = Path(__file__).parent.parent / "languages"
-if _langs_dir.exists():
-    try:
-        extra_packs = LanguagePackLoader.load_directory(_langs_dir)
-        for code, profile in extra_packs.items():
-            if code not in engines:
-                engines[code] = LpteEngine(profile, cache_size=256)
-    except Exception:
-        pass  # Don't crash if JSON packs are malformed at startup
+en_prof = default_registry.get_profile("en")
+bn_prof = default_registry.get_profile("bn")
+hi_prof = default_registry.get_profile("hi")
+
+if bn_prof and en_prof:
+    multilang_engines["bn+en"] = MultiLangEngine([bn_prof, en_prof], cache_size=256)
+if hi_prof and en_prof:
+    multilang_engines["hi+en"] = MultiLangEngine([hi_prof, en_prof], cache_size=256)
 
 # Moderation policies available to the API
 policies: dict[str, ModerationPolicy] = {
@@ -92,7 +62,7 @@ policies: dict[str, ModerationPolicy] = {
 
 app = FastAPI(
     title="LPTE — Local Profanity & Toxicity Engine",
-    description="Zero-cost, on-device text toxicity analysis demo",
+    description="Zero-cost, on-device text toxicity analysis demo with dynamic language extension",
     version="1.2.0",
 )
 
@@ -138,6 +108,20 @@ class BatchAnalyzeRequest(BaseModel):
     policy: Optional[str] = None
 
 
+class AddLanguageRequest(BaseModel):
+    language_code: str = Field(..., min_length=2, max_length=10)
+    language_name: str = Field(..., min_length=1, max_length=100)
+    bad_words: list[str] = Field(..., min_length=1)
+    suffix_rules: list[str] = Field(default_factory=list)
+    word_categories: dict[str, str] = Field(default_factory=dict)
+    context_rules: dict[str, list[str]] = Field(default_factory=dict)
+    min_word_length: int = Field(2, ge=1)
+    version: str = "1.0.0"
+    description: str = ""
+    author: str = ""
+    persist: bool = True
+
+
 class DecisionModel(BaseModel):
     action: str
     reason: str
@@ -176,9 +160,33 @@ class BatchAnalyzeResponse(BaseModel):
 def _get_engine(language: str):
     """Resolve a language code, a 'bn+en' pair, or 'auto' to an engine."""
     key = (language or "en").strip().lower()
+
     if key in multilang_engines:
         return multilang_engines[key]
-    return engines.get(key, engines["en"])
+
+    if key in engines:
+        return engines[key]
+
+    # Check registry for dynamically registered single profiles
+    prof = default_registry.get_profile(key)
+    if prof is not None:
+        engine = LpteEngine(prof, cache_size=256)
+        engines[key] = engine
+        return engine
+
+    # Check for multi-language combination e.g. "it+en" or "auto"
+    if "+" in key or "," in key or key in ("auto", "all", "*"):
+        all_profs = default_registry.get_all_profiles()
+        if key in ("auto", "all", "*"):
+            return MultiLangEngine(list(all_profs.values()), cache_size=256)
+
+        codes = [c.strip().lower() for c in key.replace(",", "+").split("+") if c.strip()]
+        matched_profs = [all_profs[c] for c in codes if c in all_profs]
+        if matched_profs:
+            return MultiLangEngine(matched_profs, cache_size=256)
+
+    # Default fallback to English or first available engine
+    return engines.get("en") or next(iter(engines.values()))
 
 
 def _build_response(engine, text: str, threshold: float, policy_name: Optional[str],
@@ -244,16 +252,17 @@ def batch_analyze(req: BatchAnalyzeRequest):
 
 @app.get("/api/languages")
 def list_languages():
-    """List all available language engines."""
+    """List all available language engines (built-in + dynamically registered)."""
+    all_profiles = default_registry.get_all_profiles()
     langs = []
-    for code, engine in engines.items():
-        p = engine.profile
+    for code, p in sorted(all_profiles.items()):
         langs.append({
             "code": code,
             "name": p.language_name,
             "vocabulary_size": len(p.bad_words),
             "version": p.version,
             "description": p.description,
+            "author": getattr(p, "author", ""),
         })
     for code, ml in multilang_engines.items():
         langs.append({
@@ -264,6 +273,52 @@ def list_languages():
             "description": "Code-switched / mixed-script detection",
         })
     return {"languages": langs}
+
+
+@app.get("/api/languages/schema")
+def get_language_schema():
+    """Return standard JSON schema and metadata for dynamic language forms."""
+    return LanguageRegistry.get_schema()
+
+
+@app.post("/api/languages")
+def add_language(req: AddLanguageRequest):
+    """Dynamically register a new language pack at runtime without code changes."""
+    try:
+        data = req.model_dump()
+        persist = data.pop("persist", True)
+        profile = default_registry.register_dict(data, persist=persist)
+        code = profile.language_code
+        engines[code] = LpteEngine(profile, cache_size=256)
+        return {
+            "status": "success",
+            "message": f"Language pack '{profile.language_name}' ({code}) registered successfully",
+            "language": {
+                "code": code,
+                "name": profile.language_name,
+                "vocabulary_size": len(profile.bad_words),
+                "version": profile.version,
+            },
+            "total_languages": len(default_registry.get_all_profiles()),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to register language pack: {exc}")
+
+
+@app.delete("/api/languages/{code}")
+def remove_language(code: str, delete_file: bool = True):
+    """Unregister and optionally delete a custom language pack."""
+    code = code.strip().lower()
+    core_builtins = {"en", "bn", "zh", "ja", "ko", "ru", "es", "hi", "fr", "de", "ar"}
+    if code in core_builtins:
+        raise HTTPException(status_code=400, detail="Cannot delete core built-in language pack")
+
+    removed = default_registry.remove_profile(code, delete_file=delete_file)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Language code '{code}' not found")
+
+    engines.pop(code, None)
+    return {"status": "success", "message": f"Language '{code}' removed successfully"}
 
 
 @app.get("/api/policies")
@@ -287,6 +342,11 @@ def list_policies():
 @app.get("/api/stats")
 def get_stats():
     """Return per-engine analysis statistics."""
+    # Ensure all registered profiles have an engine instance for stats reporting
+    for code, prof in default_registry.get_all_profiles().items():
+        if code not in engines:
+            engines[code] = LpteEngine(prof, cache_size=256)
+
     return {
         "engines": {
             code: engine.engine_stats()

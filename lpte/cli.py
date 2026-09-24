@@ -10,6 +10,7 @@ Examples:
     lpte sanitize "f4ck this bullsh1t" --mask '#'
     lpte batch messages.txt --lang en --json
     lpte validate languages/bn_profile.json
+    lpte add-language languages/my_pack.json --persist
     lpte languages
     lpte bench
     lpte eval --lang en --verbose
@@ -28,36 +29,13 @@ from lpte.core.engine import LpteEngine
 from lpte.core.loader import LanguagePackLoader
 from lpte.core.multilang import MultiLangEngine
 from lpte.core.policy import Action, ModerationPolicy, POLICY_PRESETS, get_policy
+from lpte.core.registry import default_registry
 from lpte.eval import evaluate, evaluate_all, overall
-
-# ─── Registry ─────────────────────────────────────────────────────────────────
-
-def _builtin_profiles() -> dict[str, object]:
-    """Lazily import built-in profiles (keeps startup fast)."""
-    from lpte.languages import (
-        ArabicProfile, BengaliProfile, ChineseProfile, EnglishProfile,
-        FrenchProfile, GermanProfile, HindiProfile, JapaneseProfile,
-        KoreanProfile, RussianProfile, SpanishProfile,
-    )
-    return {
-        "en": EnglishProfile, "bn": BengaliProfile, "zh": ChineseProfile,
-        "ja": JapaneseProfile, "ko": KoreanProfile, "ru": RussianProfile,
-        "es": SpanishProfile, "hi": HindiProfile, "fr": FrenchProfile,
-        "de": GermanProfile, "ar": ArabicProfile,
-    }
 
 
 def available_languages() -> dict[str, object]:
-    """Built-in profiles, overlaid with any JSON packs in ./languages."""
-    profiles = _builtin_profiles()
-    langs_dir = Path.cwd() / "languages"
-    if langs_dir.is_dir():
-        try:
-            for code, profile in LanguagePackLoader.load_directory(langs_dir).items():
-                profiles.setdefault(code, profile)
-        except Exception:
-            pass
-    return profiles
+    """Get all available profiles from LanguageRegistry."""
+    return default_registry.get_all_profiles()
 
 
 def build_engine(lang_spec: str, threshold: float, cache_size: int = 512):
@@ -210,7 +188,6 @@ def cmd_batch(args) -> int:
 
 def cmd_validate(args) -> int:
     path = Path(args.file)
-    ok = True
     try:
         profile = LanguagePackLoader.load_file(path)
     except Exception as exc:
@@ -224,7 +201,40 @@ def cmd_validate(args) -> int:
     print(f"  categories   : {len(profile.word_categories)}")
     print(f"  min word len : {profile.min_word_length}")
     print(f"  version      : {profile.version}")
-    return 0 if ok else 1
+    return 0
+
+
+def cmd_add_language(args) -> int:
+    source = args.source.strip()
+    try:
+        # Check if source is a file path or inline JSON
+        source_path = Path(source)
+        if source_path.exists() and source_path.is_file():
+            profile = default_registry.register_file(source_path, persist=args.persist)
+        else:
+            profile = default_registry.register_json(source, persist=args.persist)
+
+        if args.json:
+            print(json.dumps({
+                "status": "registered",
+                "code": profile.language_code,
+                "name": profile.language_name,
+                "bad_words_count": len(profile.bad_words),
+                "persisted": args.persist,
+            }, indent=2))
+        else:
+            print(f"SUCCESS  Registered language pack '{profile.language_name}' ({profile.language_code})")
+            print(f"  bad words    : {len(profile.bad_words)}")
+            print(f"  version      : {profile.version}")
+            if args.persist:
+                print(f"  persisted to : {default_registry.languages_dir / f'{profile.language_code}_profile.json'}")
+        return 0
+    except Exception as exc:
+        if args.json:
+            print(json.dumps({"status": "error", "message": str(exc)}, indent=2))
+        else:
+            print(f"ERROR    Failed to register language pack: {exc}")
+        return 1
 
 
 def cmd_languages(args) -> int:
@@ -287,7 +297,7 @@ def cmd_eval(args) -> int:
     """Run the labelled evaluation corpus and report precision/recall/F1."""
     from lpte.eval import EVAL_SETS
 
-    profiles = _builtin_profiles()
+    profiles = default_registry.get_all_profiles()
     if args.lang == "all":
         reports = evaluate_all(profiles, args.threshold)
         if not reports:
@@ -393,6 +403,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_val = sub.add_parser("validate", help="validate a JSON language pack")
     p_val.add_argument("file")
     p_val.set_defaults(func=cmd_validate)
+
+    p_add = sub.add_parser("add-language", help="register a new language pack dynamically")
+    p_add.add_argument("source", help="path to JSON pack file or inline JSON string")
+    p_add.add_argument("--persist", action="store_true", help="persist pack file to disk")
+    p_add.add_argument("--json", action="store_true", help="emit JSON output")
+    p_add.set_defaults(func=cmd_add_language)
 
     p_lang = sub.add_parser("languages", help="list available language packs")
     p_lang.add_argument("--json", action="store_true")
