@@ -15,7 +15,7 @@ LPTE is an open-source Python library for detecting and filtering toxic, profane
 - **Code-Switching** — Handles mixed-script chat (Banglish, Hinglish) via script routing
 - **Stemming** — Language-aware suffix, particle, and affix stripping across Latin, Cyrillic, Devanagari, Bengali, Arabic, Hangul, Kana, and CJK
 - **Batch, HTML & Async** — Process batches, raw HTML, or await results off the event loop
-- **CLI Included** — `lpte analyze | sanitize | batch | validate | languages | bench`
+- **CLI Included** — `lpte analyze | sanitize | batch | validate | languages | bench | eval`
 - **Zero Dependencies** — Pure Python, no external packages required
 - **Pluggable Architecture** — Drop in a JSON language file, no code changes needed
 
@@ -376,7 +376,7 @@ pytest --cov=lpte --cov-report=term-missing
 pytest tests/test_bypass_tricks.py -v
 ```
 
-The test suite covers **313 cases** across:
+The test suite covers **373 cases** across:
 - Bypass trick detection (leetspeak, zero-width, word splitting, etc.)
 - False positive prevention (clean words containing profanity substrings)
 - Context-rule correctness (benign compounds, unspaced-script compounds)
@@ -385,6 +385,7 @@ The test suite covers **313 cases** across:
 - Moderation policy decisions (allowlist, denylist, per-category thresholds)
 - Multi-language / code-switched detection
 - Sanitization of obfuscated surface forms
+- Labelled-corpus accuracy floors per language (`lpte eval`)
 - CLI behaviour
 - Performance regression budgets
 
@@ -394,11 +395,14 @@ Measured with `lpte bench` on a single core, cache disabled:
 
 | Workload | v1.0 | v1.2 | Change |
 |---|---|---|---|
-| Chat line (~5 words) | 0.251 ms | **0.050 ms** | 5.0× faster |
-| Paragraph (~20 words) | 0.788 ms | **0.139 ms** | 5.7× faster |
-| Long comment (200 words) | 27.74 ms | **3.69 ms** | 7.5× faster |
-| Obfuscated text | 0.057 ms | **0.024 ms** | 2.4× faster |
-| Batch throughput | 4,464/s | **19,492/s** | 4.4× higher |
+| Chat line (~5 words) | 0.146 ms | **0.049 ms** | 3.0× faster |
+| Paragraph (~20 words) | 0.548 ms | **0.153 ms** | 3.6× faster |
+| Long comment (200 words) | 25.43 ms | **3.44 ms** | 7.4× faster |
+| Obfuscated text | 0.054 ms | **0.025 ms** | 2.2× faster |
+| Batch throughput | 4,794/s | **21,734/s** | 4.5× higher |
+
+Absolute numbers depend on hardware and machine load (run `lpte bench` for
+yours); the ratios are the stable part.
 
 The worst case is long **clean** text, because every pipeline stage has to run
 before the engine can conclude there is nothing there — that is the case the
@@ -413,6 +417,34 @@ How it stays fast:
 - Script routing, so mixed-script text only runs the engines that could match
 
 Run `lpte bench` to reproduce on your own hardware.
+
+## Accuracy
+
+`lpte eval` runs a labelled corpus (151 cases across all 11 languages) and
+reports precision / recall / F1:
+
+```bash
+lpte eval                      # all languages
+lpte eval --lang bn --verbose  # one language, list every error
+lpte eval --fail-under 0.90    # CI gate
+```
+
+```
+lang    total     acc    prec  recall      f1  FP/FN
+--------------------------------------------------------------
+en         53   1.000   1.000   1.000   1.000  0 FP / 0 FN
+bn         24   1.000   1.000   1.000   1.000  0 FP / 0 FN
+...
+ALL       151   1.000   1.000   1.000   1.000  0 FP / 0 FN
+```
+
+**Read this honestly.** The corpus is small and high-signal, and the engine
+has been tuned against it — it is a regression guard, not proof of real-world
+accuracy. Its value is that a pack change can no longer silently degrade
+detection: the clean half is deliberately packed with hard negatives
+(Scunthorpe-class words, technical usage, benign collocations), so a careless
+vocabulary addition shows up as a number. Extend `lpte/eval.py` with cases
+from your own traffic as you tune.
 
 ## Live Demo
 

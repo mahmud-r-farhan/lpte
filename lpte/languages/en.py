@@ -115,6 +115,17 @@ _ENGLISH_BAD_WORDS: set[str] = {
     "murder", "murder you",
     "rape", "rapist", "pedophile", "pedo", "groomer",
 
+    # ── Vowel-dropped / deliberate misspellings ───────────────────────────────
+    # Dropping vowels is a standard evasion trick ("fcking", "bstrd"). These
+    # are listed explicitly rather than by stripping vowels at runtime, because
+    # blanket vowel-stripping collides catastrophically with ordinary words
+    # (count → cnt → cunt, bass → bss → ass). None of the strings below are
+    # real words in any language, so they carry no false-positive risk.
+    "fck", "fcking", "fckn", "fkn", "fuk", "fuking", "fukk",
+    "phuck", "phuk", "phucking",
+    "bstrd", "mthrfcker", "mthrfkr", "btch", "biatch",
+    "a$$", "azz", "shyt", "wh0re",
+
     # ── Bullying / personal attacks (the most common real-world reports) ──────
     # Categorised as "insult" (non-escalating): hurtful, but not the same harm
     # class as a slur or a threat, so policies can mask instead of block.
@@ -122,6 +133,7 @@ _ENGLISH_BAD_WORDS: set[str] = {
     "worthless", "useless", "disgusting", "scum", "trash",
     "garbage", "freak", "weirdo", "creep", "shut up",
     "nobody likes you", "kill yourself", "kys",
+    "stfu", "gtfo",
 }
 
 # ─── Content Categories ───────────────────────────────────────────────────────
@@ -135,7 +147,7 @@ _ENGLISH_WORD_CATEGORIES: dict[str, str] = {
         "nigger", "nigga", "spic", "chink", "kike", "wetback", "cracker",
         "honky", "gook", "towelhead", "sandnigger", "beaner", "redskin",
         "raghead", "zipperhead", "coon", "darkie", "jungle bunny",
-        "porch monkey", "faggot", "fag", "dyke", "homo", "queer",
+        "porch monkey", "faggot", "fag", "dyke", "homo",
         "tranny", "shemale", "ladyboy", "retard", "retarded", "cripple",
         "spastic", "tard", "whore", "slut", "cunt",
     )},
@@ -156,6 +168,9 @@ _ENGLISH_WORD_CATEGORIES: dict[str, str] = {
         "stupid", "idiotic", "ugly", "loser", "pathetic", "worthless",
         "useless", "disgusting", "scum", "trash", "garbage", "freak",
         "weirdo", "creep", "shut up", "nobody likes you",
+        "stfu", "gtfo",
+        # Reclaimed / ambiguous: detectable, but masked rather than blocked.
+        "queer",
     )},
 }
 
@@ -173,7 +188,10 @@ EnglishProfile = LanguageProfile(
         "prick":  {"prickle", "lipstick"},
         "crap":   {"crapper", "crappy"},
         "bitch":  {"bitchy"},
-        "queer":  {"queerly"},
+        "queer":  {"queerly", "queer community", "queer studies",
+                   "queer theory", "queer rights", "queer people",
+                   "queer youth", "queer identity", "queer cinema",
+                   "queer literary", "queer history"},
         "kys":    set(),   # no safe variants — always flag
         # Everyday nouns that double as insults. The classifier only allows
         # these when the word's occurrence sits inside the benign collocation,

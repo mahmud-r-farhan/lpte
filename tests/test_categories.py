@@ -153,6 +153,103 @@ class TestSeverityCalibration:
         assert slur.severity > insult.severity
 
 
+class TestAllLanguagesCategorised:
+    """
+    The policy layer only works if every pack declares categories — otherwise
+    a slur in Russian or Korean silently degrades to plain profanity.
+    """
+
+    def test_every_pack_declares_categories(self):
+        from lpte.languages import (
+            ArabicProfile, BengaliProfile, ChineseProfile, EnglishProfile,
+            FrenchProfile, GermanProfile, HindiProfile, JapaneseProfile,
+            KoreanProfile, RussianProfile, SpanishProfile,
+        )
+        packs = {
+            "en": EnglishProfile, "bn": BengaliProfile, "ru": RussianProfile,
+            "zh": ChineseProfile, "ja": JapaneseProfile, "ko": KoreanProfile,
+            "es": SpanishProfile, "hi": HindiProfile, "fr": FrenchProfile,
+            "de": GermanProfile, "ar": ArabicProfile,
+        }
+        for code, profile in packs.items():
+            assert len(profile.word_categories) > 0, (
+                f"{code} has no word_categories — slurs/threats won't escalate"
+            )
+
+    def test_no_category_key_is_unknown(self):
+        """Guards against typos in non-Latin scripts silently doing nothing."""
+        from lpte.languages import (
+            ArabicProfile, BengaliProfile, ChineseProfile, EnglishProfile,
+            FrenchProfile, GermanProfile, HindiProfile, JapaneseProfile,
+            KoreanProfile, RussianProfile, SpanishProfile,
+        )
+        packs = {
+            "en": EnglishProfile, "bn": BengaliProfile, "ru": RussianProfile,
+            "zh": ChineseProfile, "ja": JapaneseProfile, "ko": KoreanProfile,
+            "es": SpanishProfile, "hi": HindiProfile, "fr": FrenchProfile,
+            "de": GermanProfile, "ar": ArabicProfile,
+        }
+        for code, profile in packs.items():
+            unknown = [w for w in profile.word_categories if w not in profile.bad_words]
+            assert not unknown, f"{code}: category keys not in vocabulary: {unknown}"
+
+    @pytest.mark.parametrize("code,text,category", [
+        ("ru", "пидор", "slur"),
+        ("zh", "婊子", "slur"),
+        ("ja", "死ね", "threat"),
+        ("ko", "병신", "slur"),
+        ("es", "puta marica", "slur"),
+        ("hi", "हिजड़ा", "slur"),
+        ("fr", "négre salope", "slur"),
+        ("de", "neger schwuchtel", "slur"),
+        ("ar", "شرموطة", "slur"),
+    ])
+    def test_slurs_escalate_in_every_language(self, code, text, category):
+        from lpte.languages import (
+            ArabicProfile, ChineseProfile, FrenchProfile, GermanProfile,
+            HindiProfile, JapaneseProfile, KoreanProfile, RussianProfile,
+            SpanishProfile,
+        )
+        packs = {
+            "ru": RussianProfile, "zh": ChineseProfile, "ja": JapaneseProfile,
+            "ko": KoreanProfile, "es": SpanishProfile, "hi": HindiProfile,
+            "fr": FrenchProfile, "de": GermanProfile, "ar": ArabicProfile,
+        }
+        engine = LpteEngine(packs[code], cache_size=0)
+        result = engine.analyze(text)
+        assert category in result.categories, f"{code}: {text}"
+        assert result.severity == Severity.CRITICAL, f"{code}: {text} did not escalate"
+
+
+class TestReclaimedAndAmbiguousTerms:
+    """
+    Words that are legitimately used by the community they describe must not
+    be hard-blocked — that censors the very people moderation should protect.
+    """
+
+    @pytest.mark.parametrize("text", [
+        "the queer community centre",
+        "queer studies course",
+        "queer rights are human rights",
+        "queer history month",
+    ])
+    def test_reclaimed_queer_usage_allowed(self, en, text):
+        assert not en.analyze(text).is_toxic, text
+
+    def test_abusive_queer_usage_still_flagged(self, en):
+        result = en.analyze("you are such a queer")
+        assert result.is_toxic
+        # detectable, but masked rather than hard-blocked
+        assert result.severity == Severity.HIGH
+        assert "slur" not in result.categories
+
+    def test_unambiguous_slurs_still_blocked(self, en):
+        from lpte.core.policy import Action, policy_balanced
+        policy = policy_balanced()
+        for text in ["you nigger", "you faggot", "you tranny", "you retard"]:
+            assert policy.decide(en.analyze(text)).action == Action.BLOCK, text
+
+
 class TestDeterminism:
     def test_matched_terms_order_is_stable(self, en):
         """Set iteration must never leak into output ordering."""

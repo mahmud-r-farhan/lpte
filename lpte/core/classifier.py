@@ -387,6 +387,15 @@ class Classifier:
         # ── Signal 4: Fuzzy matching — edit distance ≤ 1 ─────────────────────
         # Require both word and bad_word to be >= 5 chars to avoid false
         # positives from short common words ("today", "you", "are", etc.).
+        #
+        # The first character must also match. Obfuscation has to stay
+        # readable to land, so it preserves the initial letter ("fukc",
+        # "ashole", "sh1t"); a first-letter change produces a *different
+        # word*, not a disguised one. Without this guard, French "bonne
+        # journée" (good day) matches "conne" and German "Penner" matches
+        # "Penis" — exactly the false positives that make a filter
+        # unusable in a language you don't speak.
+        #
         # Candidates come from the delete-1 index, then are verified with the
         # exact edit-distance predicate (no transposition false positives).
         if not matched_terms:
@@ -396,7 +405,7 @@ class Classifier:
                     continue
                 tried: set[str] = set()
                 for cand in index.fuzzy_candidates(word):
-                    if cand in tried:
+                    if cand in tried or cand[0] != word[0]:
                         continue
                     tried.add(cand)
                     if _edit_distance_1(word, cand) and not _is_context_clean(

@@ -54,11 +54,38 @@ _HINDI_BAD_WORDS: set[str] = {
     "पागल", "गधा", "उल्लू", "नालायक", "बेशरम",
 }
 
+# ─── Content Categories ───────────────────────────────────────────────────────
+# Slurs and threats escalate severity; profanity is the default.
+_HINDI_WORD_CATEGORIES: dict[str, str] = {
+    **{w: "slur" for w in (
+        "हिजड़ा", "छक्का", "वेश्या", "रांड", "रंडी", "रान्ड",
+        "खानकी", "मागी", "छिनाल",
+    )},
+    **{w: "insult" for w in (
+        # Common cusswords — "साला" literally means brother-in-law and is used
+        # as everyday idiom, so these mask rather than block.
+        "हरामी", "हरामजादा", "हरामजादी", "हरामज़ादा",
+        "कमीना", "कमीने", "कमीनी", "साला", "साले",
+        "साली", "मादरचोद", "मादर", "मादरजात", "बहनचोद", "भेनचोद",
+        "बकचोद", "बकचोदी",
+    )},
+    **{w: "sexual" for w in (
+        "चूत", "चूतिया", "चूतिये", "चुतिया", "लंड", "झांट",
+        "झाँट", "भोसड़ी", "भोसडी", "भोसड़ीके", "भोसडीके", "गांड",
+        "गांडू", "गांडमरा", "गांडमस्ती", "लौंडा", "लौंडे", "लौंडिया",
+    )},
+    **{w: "insult" for w in (
+        "पागल", "गधा", "उल्लू", "नालायक", "बेशरम", "कुत्ता",
+        "कुत्ते", "कुत्ती", "कुतिया", "सूअर", "सूअरके", "सुअर",
+    )},
+}
+
 HindiProfile = LanguageProfile(
     language_code="hi",
     language_name="हिन्दी (Hindi)",
     bad_words=_HINDI_BAD_WORDS,
     stemmer=HindiStemmer(),
+    word_categories=_HINDI_WORD_CATEGORIES,
     context_rules={
         "कुत्ता": {"पिल्ला", "कुत्तेपालक"},
     },

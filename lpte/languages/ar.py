@@ -49,8 +49,25 @@ _ARABIC_BAD_WORDS: set[str] = {
     "كس", "كسختك", "طيز", "زب", "عرص",
     "ابن الكلب", "كلب", "ابن الحرام", "ابن الشرموطة", "ابن القحبة",
     "خرا", "خراء", "وسخ", "سافل", "حقير", "تافه", "حمار",
+    "اخرس",
     "لوطي", "ديوث", "زنديق", "ملعون",
     "يلعن", "لعنة", "اللعنة", "تبا",
+}
+
+# ─── Content Categories ───────────────────────────────────────────────────────
+# Slurs and threats escalate severity; profanity is the default.
+_ARABIC_WORD_CATEGORIES: dict[str, str] = {
+    **{w: "slur" for w in (
+        "شرموطة", "شرموط", "قحبة", "منيوك", "منيوكة", "عرص",
+        "لوطي", "ديوث", "زنديق", "كلب", "حمار",
+        "ابن الكلب", "ابن الحرام", "ابن الشرموطة", "ابن القحبة",
+    )},
+    **{w: "sexual" for w in (
+        "كس", "كسختك", "طيز", "زب",
+    )},
+    **{w: "insult" for w in (
+        "وسخ", "سافل", "حقير", "تافه",
+    )},
 }
 
 ArabicProfile = LanguageProfile(
@@ -58,6 +75,7 @@ ArabicProfile = LanguageProfile(
     language_name="العربية (Arabic)",
     bad_words=_ARABIC_BAD_WORDS,
     stemmer=ArabicStemmer(),
+    word_categories=_ARABIC_WORD_CATEGORIES,
     context_rules={
         "كلب": {"كلب بوليسي", "جرو"},
     },

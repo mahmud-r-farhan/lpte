@@ -143,6 +143,18 @@ policy = ModerationPolicy(
 )
 ```
 
+**Measure, don't guess.** Extend the labelled corpus in `lpte/eval.py` with
+real messages from your traffic, then:
+
+```bash
+lpte eval --lang en --verbose    # see exactly what you get wrong
+lpte eval --fail-under 0.90      # CI gate against regressions
+```
+
+The shipped corpus is a regression guard, not proof of real-world accuracy —
+it is small, and the engine has been tuned against it. Its value is that a
+vocabulary change can no longer silently break something you fixed before.
+
 **Rollout procedure used in practice:**
 
 1. **Shadow mode (1–2 weeks).** Run `analyze()` on real traffic, log results,
@@ -157,7 +169,30 @@ policy = ModerationPolicy(
 
 ---
 
-## 5. Honest limitations
+## 5. Measuring accuracy before you ship
+
+Add your own cases to `lpte/eval.py` — they should come from real moderation
+decisions, not from imagination:
+
+```python
+ENGLISH: list[tuple[str, bool]] = [
+    ("your community's benign jargon", CLEAN),
+    ("an actual insult your users type", TOXIC),
+]
+```
+
+Then `lpte eval --lang en --verbose` lists every false positive and false
+negative, which is the fastest way to find out what your pack is missing.
+Gate merges on `lpte eval --fail-under <n>`.
+
+Two rules of thumb from operating these systems:
+
+- **A false positive costs more than a false negative** in most communities.
+  Blocking an innocent user is visible and memorable; missing one insult is not.
+- **Recall on slurs and threats matters more than recall on swearing.** Miss
+  "damn" and nothing happens; miss a racial slur and you have an incident.
+
+## 6. Honest limitations
 
 Stating these is part of making this usable in production.
 
@@ -177,7 +212,7 @@ residual to a classifier or human review.
 
 ---
 
-## 6. Deployment topologies
+## 7. Deployment topologies
 
 ```
 A. Embedded (recommended for mobile/desktop)
@@ -200,23 +235,23 @@ the bulk of the load before anything is billed or leaves the device.
 
 ---
 
-## 7. Performance budget
+## 8. Performance budget
 
 Measured on this repository (`lpte bench`), single core, no cache:
 
 | Workload | Before | After | Budget |
 |---|---|---|---|
-| Chat line (~5 words) | 0.251 ms | **0.050 ms** | < 1 ms |
-| Paragraph (~20 words) | 0.788 ms | **0.139 ms** | < 2 ms |
-| Long comment (200 words) | 27.74 ms | **3.69 ms** | < 15 ms |
-| Batch throughput | 4,464/s | **19,492/s** | — |
+| Chat line (~5 words) | 0.146 ms | **0.049 ms** | < 1 ms |
+| Paragraph (~20 words) | 0.548 ms | **0.153 ms** | < 2 ms |
+| Long comment (200 words) | 25.43 ms | **3.44 ms** | < 15 ms |
+| Batch throughput | 4,794/s | **21,734/s** | — |
 
 Worst case is long *clean* text, because every stage must run before the
 engine can conclude "nothing here". That is the case the optimisation targeted.
 
 ---
 
-## 8. Adding a language (the data-change path)
+## 9. Adding a language (the data-change path)
 
 ```json
 {
@@ -235,12 +270,13 @@ and it is picked up automatically — no code change, no rebuild.
 
 ---
 
-## 9. Roadmap priorities (derived from these use cases)
+## 10. Roadmap priorities (derived from these use cases)
 
-1. **Severity/category coverage for all 11 packs** — only English and Bengali
-   carry full `word_categories` today; the rest default to `profanity`.
-2. **Romanized slang packs** — Banglish/Hinglish transliterations.
-3. **Eval harness** — a labelled corpus per language so "accuracy" is a number
-   rather than an impression.
+1. ~~**Severity/category coverage for all 11 packs**~~ — shipped in v1.2.0.
+   Remaining: raise coverage where it is still under 80% (ar, zh, es).
+2. **Romanized slang packs** — Banglish/Hinglish transliterations are common in
+   South Asian chat and are the largest remaining recall gap.
+3. ~~**Eval harness**~~ — shipped in v1.2.0 (`lpte eval`, 151 labelled cases).
+   Next: grow the corpus from real production traffic.
 4. **Context windows** — negation and quotation handling to cut false positives.
 5. **Pack telemetry** — which rules fire most, to target curation effort.

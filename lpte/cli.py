@@ -12,6 +12,7 @@ Examples:
     lpte validate languages/bn_profile.json
     lpte languages
     lpte bench
+    lpte eval --lang en --verbose
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from lpte.core.engine import LpteEngine
 from lpte.core.loader import LanguagePackLoader
 from lpte.core.multilang import MultiLangEngine
 from lpte.core.policy import Action, ModerationPolicy, POLICY_PRESETS, get_policy
+from lpte.eval import evaluate, evaluate_all, overall
 
 # ─── Registry ─────────────────────────────────────────────────────────────────
 
@@ -281,6 +283,75 @@ def cmd_bench(args) -> int:
     return 0
 
 
+def cmd_eval(args) -> int:
+    """Run the labelled evaluation corpus and report precision/recall/F1."""
+    from lpte.eval import EVAL_SETS
+
+    profiles = _builtin_profiles()
+    if args.lang == "all":
+        reports = evaluate_all(profiles, args.threshold)
+        if not reports:
+            print("No evaluation data available.")
+            return 1
+        print(f"{'lang':6} {'total':>6} {'acc':>7} {'prec':>7} {'recall':>7} {'f1':>7}  FP/FN")
+        print("-" * 62)
+        for code, r in sorted(reports.items()):
+            print(f"{code:6} {r.total:6} {r.accuracy:7.3f} {r.precision:7.3f} "
+                  f"{r.recall:7.3f} {r.f1:7.3f}  {r.false_positives} FP / {r.false_negatives} FN")
+        tot = overall(reports)
+        print("-" * 62)
+        print(f"{'ALL':6} {tot.total:6} {tot.accuracy:7.3f} {tot.precision:7.3f} "
+              f"{tot.recall:7.3f} {tot.f1:7.3f}  {tot.false_positives} FP / {tot.false_negatives} FN")
+
+        if args.verbose:
+            if tot.false_positive_examples:
+                print("\nFalse positives (clean text flagged):")
+                for t in tot.false_positive_examples:
+                    print(f"  {t!r}")
+            if tot.false_negative_examples:
+                print("\nFalse negatives (toxic text missed):")
+                for t in tot.false_negative_examples:
+                    print(f"  {t!r}")
+
+        if args.fail_under is not None and tot.f1 < args.fail_under:
+            print(f"\nFAIL: overall F1 {tot.f1:.3f} < required {args.fail_under:.3f}")
+            return 1
+        return 0
+
+    # single language
+    code = args.lang
+    profile = profiles.get(code)
+    if profile is None:
+        print(f"Unknown language: {code}")
+        return 1
+    cases = EVAL_SETS.get(code)
+    if not cases:
+        print(f"No evaluation corpus for '{code}'.")
+        return 1
+    r = evaluate(profile, cases, args.threshold, language_code=code)
+    print(f"language  : {code}")
+    print(f"total     : {r.total}")
+    print(f"accuracy  : {r.accuracy:.3f}")
+    print(f"precision : {r.precision:.3f}")
+    print(f"recall    : {r.recall:.3f}")
+    print(f"f1        : {r.f1:.3f}")
+    print(f"TP={r.true_positives} FP={r.false_positives} "
+          f"TN={r.true_negatives} FN={r.false_negatives}")
+    if args.verbose:
+        if r.false_positive_examples:
+            print("\nFalse positives:")
+            for t in r.false_positive_examples:
+                print(f"  {t!r}")
+        if r.false_negative_examples:
+            print("\nFalse negatives:")
+            for t in r.false_negative_examples:
+                print(f"  {t!r}")
+    if args.fail_under is not None and r.f1 < args.fail_under:
+        print(f"\nFAIL: F1 {r.f1:.3f} < required {args.fail_under:.3f}")
+        return 1
+    return 0
+
+
 # ─── Parser ───────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -326,6 +397,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_lang = sub.add_parser("languages", help="list available language packs")
     p_lang.add_argument("--json", action="store_true")
     p_lang.set_defaults(func=cmd_languages)
+
+    p_eval = sub.add_parser("eval", help="run the labelled accuracy evaluation")
+    p_eval.add_argument("--lang", default="all",
+                        help="language code, or 'all' (default)")
+    p_eval.add_argument("--threshold", type=float, default=0.6)
+    p_eval.add_argument("--verbose", action="store_true",
+                        help="list every false positive and false negative")
+    p_eval.add_argument("--fail-under", type=float, default=None,
+                        help="exit non-zero if F1 is below this value (for CI)")
+    p_eval.set_defaults(func=cmd_eval)
 
     p_bench = sub.add_parser("bench", help="run a latency benchmark")
     p_bench.add_argument("--lang", default="en")

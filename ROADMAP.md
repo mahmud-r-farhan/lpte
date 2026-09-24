@@ -28,6 +28,12 @@
 - [x] `lpte` CLI: analyze / sanitize / batch / validate / languages / bench
 - [x] 313 tests (from 148)
 
+- [x] Content categories for all 11 packs (was English + Bengali only)
+- [x] Labelled evaluation corpus + `lpte eval` with precision/recall/F1
+- [x] Fuzzy-match first-character guard (fixes "bonne journée" → "conne")
+- [x] Vowel-dropped evasion forms ("fcking", "bstrd", "phuck")
+- [x] 373 tests (from 148)
+
 **Language data fixes**
 - [x] Bengali: removed bare possessives (`মায়ের` = "mother's") that flagged
       ordinary sentences like "my mother's cooking is lovely"

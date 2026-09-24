@@ -17,6 +17,7 @@ from lpte.core.profile import LanguageProfile
 from lpte.core.loader import LanguagePackLoader
 from lpte.core.cache import LRUCache
 from lpte.core.multilang import MultiLangEngine, detect_scripts
+from lpte.eval import EVAL_SETS, EvalReport, evaluate, evaluate_all, overall
 from lpte.core.policy import (
     POLICY_PRESETS,
     Action,
@@ -42,6 +43,12 @@ __all__ = [
     "LanguageProfile",
     "LanguagePackLoader",
     "LRUCache",
+    # Evaluation
+    "evaluate",
+    "evaluate_all",
+    "overall",
+    "EvalReport",
+    "EVAL_SETS",
     # Moderation policy
     "ModerationPolicy",
     "PolicyDecision",

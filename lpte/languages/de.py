@@ -46,9 +46,28 @@ _GERMAN_BAD_WORDS: set[str] = {
     "fick", "ficken", "gefickt", "ficker", "fickfehler",
     "verdammt", "vollidiot", "idiot", "spast", "spasti",
     "depp", "deppen", "kretin", "honk", "penner",
+    "fresse", "maul", "schnauze", "halt die fresse", "halts maul",
     # Slurs
     "kanake", "neger", "schwuchtel", "tunte",
     "missgeburt", "behindert",
+}
+
+# ─── Content Categories ───────────────────────────────────────────────────────
+# Slurs and threats escalate severity; profanity is the default.
+_GERMAN_WORD_CATEGORIES: dict[str, str] = {
+    **{w: "slur" for w in (
+        "neger", "kanake", "schwuchtel", "tunte", "spast", "spasti",
+        "behindert", "missgeburt",
+    )},
+    **{w: "sexual" for w in (
+        "fick", "ficken", "gefickt", "ficker", "fotze", "wichser",
+        "wichsen", "wixer", "hure", "nutte", "schlampe", "hurensohn",
+    )},
+    **{w: "insult" for w in (
+        "arschloch", "arsch", "arschgeige", "arschgesicht", "vollidiot", "idiot",
+        "depp", "deppen", "kretin", "honk", "penner", "drecksau",
+        "schweinehund", "miststuck", "scheisskerl",
+    )},
 }
 
 GermanProfile = LanguageProfile(
@@ -56,6 +75,7 @@ GermanProfile = LanguageProfile(
     language_name="Deutsch (German)",
     bad_words=_GERMAN_BAD_WORDS,
     stemmer=GermanStemmer(),
+    word_categories=_GERMAN_WORD_CATEGORIES,
     context_rules={},
     min_word_length=2,
     version="1.1.0",

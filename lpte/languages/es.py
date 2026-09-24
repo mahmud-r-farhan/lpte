@@ -60,11 +60,33 @@ _SPANISH_BAD_WORDS: set[str] = {
     "zorra", "perra", "bastardo", "bastarda",
 }
 
+# ─── Content Categories ───────────────────────────────────────────────────────
+# Slurs and threats escalate severity; profanity is the default.
+_SPANISH_WORD_CATEGORIES: dict[str, str] = {
+    **{w: "slur" for w in (
+        "puta", "puto", "putas", "putos", "puton", "putona",
+        "zorra", "perra", "bastardo", "bastarda", "marica", "maricon",
+        "maricones", "gonorrea",
+    )},
+    **{w: "sexual" for w in (
+        "coño", "coños", "chinga", "chingada", "chingado", "chingar",
+        "chingados", "verga", "culo", "picha", "cipote", "culero",
+        "culera",
+    )},
+    **{w: "insult" for w in (
+        "pendejo", "pendeja", "pendejos", "pendejas", "estupido", "estupida",
+        "estupidos", "estupidas", "idiota", "idiotas", "imbecil", "imbeciles",
+        "gilipollas", "mamaguevo", "mamabicho", "careverga", "maldito", "maldita",
+        "malditos", "malditas",
+    )},
+}
+
 SpanishProfile = LanguageProfile(
     language_code="es",
     language_name="Español (Spanish)",
     bad_words=_SPANISH_BAD_WORDS,
     stemmer=SpanishStemmer(),
+    word_categories=_SPANISH_WORD_CATEGORIES,
     context_rules={},
     min_word_length=2,
     version="1.1.0",

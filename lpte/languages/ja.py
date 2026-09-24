@@ -55,11 +55,37 @@ _JAPANESE_BAD_WORDS: set[str] = {
     "ガキ", "餓鬼", "クソガキ", "負け犬", "障害者", "ガイジ",
 }
 
+# ─── Content Categories ───────────────────────────────────────────────────────
+# Slurs and threats escalate severity; profanity is the default.
+_JAPANESE_WORD_CATEGORIES: dict[str, str] = {
+    **{w: "threat" for w in (
+        "死ね", "殺す", "殺せ", "くたばれ", "消えろ", "死に晒せ",
+        "自殺しろ",
+    )},
+    **{w: "slur" for w in (
+        "きちがい", "キチガイ", "気違い", "基地外", "ガイジ", "障害者",
+    )},
+    **{w: "sexual" for w in (
+        "変態", "ヘンタイ", "へんたい", "痴漢", "ちかん", "チカン",
+        "淫乱", "いんらん", "売春婦", "娼婦", "ヤリマン", "やりまん",
+        "童貞", "処女", "チンポ", "ちんぽ", "チンコ", "ちんこ",
+        "まんこ", "マンコ",
+    )},
+    **{w: "insult" for w in (
+        "ばか", "バカ", "馬鹿", "大馬鹿", "あほ", "アホ",
+        "阿呆", "雑魚", "ざこ", "ザコ", "カス", "かす",
+        "屑", "クズ", "くず", "ゴミ", "ごみ", "豚",
+        "ブタ", "ぶた", "蛆虫", "うじむし", "ガキ", "餓鬼",
+        "クソガキ", "負け犬",
+    )},
+}
+
 JapaneseProfile = LanguageProfile(
     language_code="ja",
     language_name="日本語 (Japanese)",
     bad_words=_JAPANESE_BAD_WORDS,
     stemmer=JapaneseStemmer(),
+    word_categories=_JAPANESE_WORD_CATEGORIES,
     context_rules={
         "豚": {"豚肉", "豚骨", "豚汁", "養豚", "黒豚", "酢豚"},
         "ゴミ": {"ゴミ箱", "ゴミ袋", "ゴミ収集", "ゴミ分別"},

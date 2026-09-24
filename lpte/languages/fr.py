@@ -56,6 +56,31 @@ _FRENCH_BAD_WORDS: set[str] = {
     "pd", "pede", "pedale", "tapette", "gouine",
     "bougnoule", "negre", "bicot", "raton",
     "debile", "abriti", "idiot", "idiote", "creve",
+    "gueule", "ta gueule", "ferme ta gueule",
+}
+
+# ─── Content Categories ───────────────────────────────────────────────────────
+# Slurs and threats escalate severity; profanity is the default.
+_FRENCH_WORD_CATEGORIES: dict[str, str] = {
+    **{w: "threat" for w in (
+        "creve",
+    )},
+    **{w: "slur" for w in (
+        "negre", "bougnoule", "bicot", "raton", "pd", "pede",
+        "pedale", "tapette", "gouine", "salope", "salopes", "salaud",
+        "salauds", "pute", "putes", "connasse", "connasses", "encule",
+        "encules", "enculee", "enculer",
+    )},
+    **{w: "sexual" for w in (
+        "bite", "bites", "couille", "couilles", "cul", "fesses",
+        "nique", "niquer", "niquez", "niquee", "chier", "chie",
+        "chieur", "chieuse",
+    )},
+    **{w: "insult" for w in (
+        "connard", "connards", "conne", "connes", "con", "cons",
+        "debile", "abriti", "idiot", "idiote", "batard", "batarde",
+        "batards", "batardes",
+    )},
 }
 
 FrenchProfile = LanguageProfile(
@@ -63,6 +88,7 @@ FrenchProfile = LanguageProfile(
     language_name="Français (French)",
     bad_words=_FRENCH_BAD_WORDS,
     stemmer=FrenchStemmer(),
+    word_categories=_FRENCH_WORD_CATEGORIES,
     context_rules={},
     min_word_length=2,
     version="1.1.0",
