@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>LPTE — Local Profanity & Toxicity Engine</title>
-  <meta name="description" content="Zero-cost, on-device real-time multilingual toxicity and profanity detection engine." />
+  <meta name="description" content="Zero-cost, on-device real-time multilingual toxicity and profanity detection engine with dynamic language extension." />
   <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
@@ -90,7 +90,7 @@
     }
 
     .header-content {
-      max-width: 1200px;
+      max-width: 1240px;
       margin: 0 auto;
       padding: 12px 20px;
       display: flex;
@@ -150,7 +150,7 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 8px 16px;
+      padding: 8px 14px;
       border-radius: 10px;
       font-size: 12px;
       font-weight: 600;
@@ -172,19 +172,6 @@
       background: var(--bg-700);
       border: 1px solid var(--border-hover);
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    }
-
-    .nav-badge {
-      font-size: 10px;
-      padding: 2px 6px;
-      border-radius: 99px;
-      background: var(--bg-800);
-      color: var(--text-muted);
-    }
-
-    .nav-tab.active .nav-badge {
-      background: var(--blue);
-      color: #ffffff;
     }
 
     /* Controls Group */
@@ -273,7 +260,7 @@
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      max-width: 1200px;
+      max-width: 1240px;
       width: 100%;
       margin: 0 auto;
       position: relative;
@@ -607,6 +594,8 @@
     .btn-action:hover:not(:disabled) { background: var(--bg-700); border-color: var(--border-hover); }
     .btn-action.primary { background: var(--blue); border-color: transparent; color: #fff; }
     .btn-action.primary:hover:not(:disabled) { filter: brightness(1.1); }
+    .btn-action.danger { background: rgba(244, 63, 94, 0.15); border-color: rgba(244, 63, 94, 0.3); color: #fda4af; }
+    .btn-action.danger:hover:not(:disabled) { background: rgba(244, 63, 94, 0.3); }
 
     .batch-row {
       display: flex;
@@ -621,6 +610,74 @@
     }
     .batch-row.toxic { border-color: rgba(244, 63, 94, 0.3); background: var(--red-glow); }
     .batch-row.clean { border-color: rgba(16, 185, 129, 0.2); }
+
+    /* Language Builder Panel */
+    .builder-container {
+      padding: 24px 20px;
+      max-width: 1000px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .form-card {
+      background: var(--bg-850);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .form-row-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .form-row-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-dim);
+    }
+
+    .form-input, .form-textarea, .form-select {
+      background: var(--bg-800);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      padding: 10px 12px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .form-input:focus, .form-textarea:focus, .form-select:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 2px var(--blue-glow);
+    }
+
+    .form-textarea {
+      font-family: var(--mono);
+      min-height: 80px;
+      resize: vertical;
+    }
 
     /* Stats Panel */
     .stats-container {
@@ -702,6 +759,7 @@
       }
       .slider-box { flex: 1; }
       .preset-grid { grid-template-columns: 1fr 1fr; }
+      .form-row-2, .form-row-3 { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -734,12 +792,12 @@
       { text: "يا ابن الكلب يا سافل",                     lang: "ar", flag: "🇸🇦", label: "Arabic Profanity" },
     ];
 
-    const LANGUAGES = [
+    const DEFAULT_LANGUAGES = [
       { code: "en", name: "English", flag: "🇬🇧" },
       { code: "bn", name: "বাংলা (Bengali)", flag: "🇧🇩" },
       { code: "bn+en", name: "বাংলা + English (Banglish)", flag: "🇧🇩" },
       { code: "hi+en", name: "हिन्दी + English (Hinglish)", flag: "🇮🇳" },
-      { code: "auto", name: "Auto (all 11 languages)", flag: "🌐" },
+      { code: "auto", name: "Auto (all languages)", flag: "🌐" },
       { code: "zh", name: "中文 (Chinese)", flag: "🇨🇳" },
       { code: "ja", name: "日本語 (Japanese)", flag: "🇯🇵" },
       { code: "ko", name: "한국어 (Korean)", flag: "🇰🇷" },
@@ -759,8 +817,6 @@
       CRITICAL: { color: "#f43f5e", bg: "rgba(244, 63, 94, 0.18)", border: "rgba(244, 63, 94, 0.4)", label: "CRITICAL" },
     };
 
-    // ─── Moderation Policy ────────────────────────────────────────────────────
-    // Detection is only half the job — the policy decides what to DO about it.
     const POLICIES = [
       { code: "",           name: "No policy (detect only)" },
       { code: "strict",     name: "Strict — kids / classroom" },
@@ -775,8 +831,6 @@
       BLOCK: { color: "#f43f5e", bg: "rgba(244, 63, 94, 0.18)",   border: "rgba(244, 63, 94, 0.4)",   label: "BLOCK", hint: "reject content" },
     };
 
-    // Harm category badges — the same confidence means different things for
-    // a swear vs a slur vs a threat.
     const CATEGORY_CONFIG = {
       profanity: { color: "#94a3b8", label: "profanity" },
       insult:    { color: "#fbbf24", label: "insult" },
@@ -806,6 +860,34 @@
         body: JSON.stringify({ texts, language, threshold, policy: policy || null }),
       });
       if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || 'Batch failed'); }
+      return res.json();
+    }
+
+    async function apiGetLanguages() {
+      const res = await fetch('/api/languages');
+      if (!res.ok) throw new Error('Languages list unavailable');
+      return res.json();
+    }
+
+    async function apiAddLanguage(pack) {
+      const res = await fetch('/api/languages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pack),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to add language pack');
+      }
+      return res.json();
+    }
+
+    async function apiDeleteLanguage(code) {
+      const res = await fetch(`/api/languages/${code}?delete_file=true`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to delete language pack');
+      }
       return res.json();
     }
 
@@ -864,7 +946,7 @@
     }
 
     // ─── Chat View ────────────────────────────────────────────────────────────
-    function ChatTab({ language, setLanguage, threshold, policy }) {
+    function ChatTab({ language, setLanguage, threshold, policy, languagesList }) {
       const [messages, setMessages] = useState([]);
       const [input, setInput] = useState('');
       const [loading, setLoading] = useState(false);
@@ -913,7 +995,6 @@
 
       return (
         <div className="tab-view">
-          {/* Top chat actions bar */}
           {messages.length > 0 && (
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 20px', borderBottom:'1px solid var(--border)', background:'var(--bg-900)' }}>
               <span style={{ fontSize:12, color:'var(--text-muted)' }}>
@@ -926,32 +1007,29 @@
             </div>
           )}
 
-          {/* Messages list / Hero empty state */}
           <div className="chat-scroll">
             {messages.length === 0 ? (
               <div className="empty-hero">
                 <div className="hero-glow-badge">
-                  <span>⚡ 100% On-Device &middot; Sub-25ms Latency &middot; 11 Languages</span>
+                  <span>⚡ 100% On-Device &middot; Sub-25ms Latency &middot; Dynamic Language Extension</span>
                 </div>
                 <h1 className="hero-title">Real-Time Toxicity & Profanity Engine</h1>
                 <p className="hero-desc">
-                  Zero cloud dependency. Detects root profanity, leetspeak obfuscation, homoglyphs, and word-splitting across 11 world languages.
+                  Zero cloud dependency. Detects root profanity, leetspeak obfuscation, homoglyphs, and word-splitting with instant plug-and-play language pack support.
                 </p>
 
-                {/* Language Quick Switcher */}
                 <div className="lang-chips-row">
-                  {LANGUAGES.map(l => (
+                  {languagesList.slice(0, 15).map(l => (
                     <button
                       key={l.code}
                       className={`lang-chip ${language === l.code ? 'active' : ''}`}
                       onClick={() => setLanguage(l.code)}
                     >
-                      {l.flag} {l.name}
+                      {l.flag || '🌐'} {l.name}
                     </button>
                   ))}
                 </div>
 
-                {/* Preset test cases */}
                 <div className="preset-grid">
                   {EXAMPLES.map((ex, i) => (
                     <div key={i} className="preset-card" onClick={() => { setLanguage(ex.lang); handleSend(ex.text, ex.lang); }}>
@@ -1004,7 +1082,6 @@
                           )}
                         </div>
 
-                        {/* Sanitized message */}
                         {isToxic && r?.sanitized && r.sanitized !== msg.text && (
                           <div style={{ padding:'8px 12px', background:'rgba(255,255,255,0.04)', borderRadius:8, margin:'8px 0', border:'1px solid var(--border)' }}>
                             <div style={{ fontSize:10, textTransform:'uppercase', color:'var(--text-muted)', fontWeight:700 }}>Sanitized Output</div>
@@ -1012,7 +1089,6 @@
                           </div>
                         )}
 
-                        {/* Confidence Meter */}
                         <div className="conf-meter">
                           <div className="conf-meter-fill" style={{ width: `${Math.round((r?.confidence || 0) * 100)}%`, background: isToxic ? 'var(--red)' : 'var(--green)' }} />
                         </div>
@@ -1036,7 +1112,6 @@
                           <span style={{ fontSize:10, color:'var(--text-muted)' }}>{msg.timestamp}</span>
                         </div>
 
-                        {/* Signal tags */}
                         {r?.signals && (
                           <div style={{ display:'flex', gap:4, marginTop:8, flexWrap:'wrap' }}>
                             {Object.entries(r.signals).map(([k, v]) => v > 0 && (
@@ -1061,7 +1136,6 @@
             )}
           </div>
 
-          {/* Input Dock */}
           <div className="input-dock">
             <div className="input-box">
               <textarea
@@ -1203,6 +1277,259 @@
       );
     }
 
+    // ─── Language Builder View ───────────────────────────────────────────────
+    function LanguageBuilderTab({ onLanguageAdded, languagesList, refreshLanguages }) {
+      const [mode, setMode] = useState('form'); // 'form' or 'json'
+      const [code, setCode] = useState('');
+      const [name, setName] = useState('');
+      const [badWordsStr, setBadWordsStr] = useState('');
+      const [suffixRulesStr, setSuffixRulesStr] = useState('');
+      const [author, setAuthor] = useState('');
+      const [version, setVersion] = useState('1.0.0');
+      const [description, setDescription] = useState('');
+      const [jsonStr, setJsonStr] = useState('');
+      const [status, setStatus] = useState(null);
+      const [loading, setLoading] = useState(false);
+
+      // Live test section inside builder
+      const [testText, setTestText] = useState('');
+      const [testResult, setTestResult] = useState(null);
+
+      const handleRegister = async () => {
+        setStatus(null);
+        setLoading(true);
+        try {
+          let pack;
+          if (mode === 'json') {
+            pack = JSON.parse(jsonStr);
+          } else {
+            if (!code.trim() || !name.trim() || !badWordsStr.trim()) {
+              throw new Error("Language Code, Language Name, and Bad Words list are required.");
+            }
+            const badWords = badWordsStr.split('\n').flatMap(line => line.split(',')).map(w => w.trim()).filter(Boolean);
+            const suffixRules = suffixRulesStr.split('\n').flatMap(line => line.split(',')).map(s => s.trim()).filter(Boolean);
+
+            pack = {
+              language_code: code.trim().toLowerCase(),
+              language_name: name.trim(),
+              bad_words: badWords,
+              suffix_rules: suffixRules,
+              author: author.trim(),
+              version: version.trim() || "1.0.0",
+              description: description.trim(),
+              persist: true,
+            };
+          }
+
+          const res = await apiAddLanguage(pack);
+          setStatus({ type: 'success', message: res.message });
+          refreshLanguages();
+          onLanguageAdded(pack.language_code);
+          if (mode === 'form') {
+            setCode(''); setName(''); setBadWordsStr(''); setSuffixRulesStr('');
+          }
+        } catch (e) {
+          setStatus({ type: 'error', message: e.message });
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleDeleteCustom = async (langCode) => {
+        if (!confirm(`Are you sure you want to delete language pack '${langCode}'?`)) return;
+        try {
+          await apiDeleteLanguage(langCode);
+          refreshLanguages();
+          setStatus({ type: 'success', message: `Language '${langCode}' deleted successfully` });
+        } catch (e) {
+          setStatus({ type: 'error', message: e.message });
+        }
+      };
+
+      // Live test inside form
+      useEffect(() => {
+        if (!testText.trim() || !badWordsStr.trim()) {
+          setTestResult(null);
+          return;
+        }
+        const words = badWordsStr.split('\n').flatMap(l => l.split(',')).map(w => w.trim().toLowerCase()).filter(Boolean);
+        const suffixes = suffixRulesStr.split('\n').flatMap(l => l.split(',')).map(s => s.trim().toLowerCase()).filter(Boolean);
+
+        const lowerText = testText.toLowerCase();
+        let matches = [];
+        for (const w of words) {
+          if (lowerText.includes(w)) matches.push(w);
+        }
+        setTestResult({
+          isToxic: matches.length > 0,
+          matches: matches,
+        });
+      }, [testText, badWordsStr, suffixRulesStr]);
+
+      const coreBuiltins = new Set(["en", "bn", "zh", "ja", "ko", "ru", "es", "hi", "fr", "de", "ar"]);
+
+      return (
+        <div className="tab-view">
+          <div className="builder-container">
+            <div>
+              <h2 style={{ fontSize:18, fontWeight:800, letterSpacing:'-0.02em', marginBottom:4 }}>🌐 Dynamic Language Builder & Manager</h2>
+              <p style={{ fontSize:13, color:'var(--text-muted)' }}>
+                Implement new language packs dynamically at runtime. No codebase modifications or restarts required.
+              </p>
+            </div>
+
+            {/* Mode Selector */}
+            <div style={{ display:'flex', gap:8 }}>
+              <button className={`btn-action ${mode === 'form' ? 'primary' : ''}`} onClick={() => setMode('form')}>
+                ✍️ Interactive Form
+              </button>
+              <button className={`btn-action ${mode === 'json' ? 'primary' : ''}`} onClick={() => setMode('json')}>
+                📄 Raw JSON Import
+              </button>
+            </div>
+
+            {status && (
+              <div style={{
+                padding:12, borderRadius:8, fontSize:13, fontWeight:600,
+                background: status.type === 'success' ? 'var(--green-glow)' : 'var(--red-glow)',
+                border: `1px solid ${status.type === 'success' ? 'var(--green)' : 'var(--red)'}`,
+                color: status.type === 'success' ? 'var(--green)' : 'var(--red)',
+              }}>
+                {status.message}
+              </div>
+            )}
+
+            {mode === 'form' ? (
+              <div className="form-card">
+                <h3 style={{ fontSize:14, fontWeight:700 }}>1. Language Pack Metadata</h3>
+                <div className="form-row-2">
+                  <div className="form-group">
+                    <label className="form-label">Language Code (e.g. 'it', 'pt', 'sw') *</label>
+                    <input className="form-input" placeholder="it" value={code} onChange={e => setCode(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Language Name (e.g. 'Italiano') *</label>
+                    <input className="form-input" placeholder="Italiano" value={name} onChange={e => setName(e.target.value)} />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Bad / Toxic Word List (one per line or comma-separated) *</label>
+                  <textarea
+                    className="form-textarea"
+                    placeholder={"stronzo\ncazzo\nmerda\nva a quel paese"}
+                    value={badWordsStr}
+                    onChange={e => setBadWordsStr(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Suffix Stemming Rules (optional, one per line or comma-separated)</label>
+                  <textarea
+                    className="form-textarea"
+                    placeholder={"zione\nmente\nissimo\nanti\ni, e, a, o"}
+                    value={suffixRulesStr}
+                    onChange={e => setSuffixRulesStr(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-row-3">
+                  <div className="form-group">
+                    <label className="form-label">Author / Contributor</label>
+                    <input className="form-input" placeholder="Community" value={author} onChange={e => setAuthor(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Version</label>
+                    <input className="form-input" placeholder="1.0.0" value={version} onChange={e => setVersion(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Description</label>
+                    <input className="form-input" placeholder="Italian profanity pack" value={description} onChange={e => setDescription(e.target.value)} />
+                  </div>
+                </div>
+
+                {/* Instant Live Test */}
+                <div style={{ marginTop:10, padding:14, background:'var(--bg-800)', borderRadius:12, border:'1px solid var(--border)' }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:'var(--blue)', marginBottom:6 }}>⚡ Live Form Test</div>
+                  <input
+                    className="form-input"
+                    style={{ width:'100%' }}
+                    placeholder="Type test text in your new language here..."
+                    value={testText}
+                    onChange={e => setTestText(e.target.value)}
+                  />
+                  {testResult && (
+                    <div style={{ marginTop:8, fontSize:12 }}>
+                      Status: <strong style={{ color: testResult.isToxic ? 'var(--red)' : 'var(--green)' }}>
+                        {testResult.isToxic ? 'TOXIC DETECTED' : 'CLEAN'}
+                      </strong>
+                      {testResult.matches.length > 0 && (
+                        <span style={{ marginLeft:8, color:'var(--text-muted)' }}>matched: {testResult.matches.join(', ')}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <button className="btn-action primary" style={{ marginTop:10 }} onClick={handleRegister} disabled={loading}>
+                  {loading ? 'Registering...' : '💾 Register & Save Language Pack'}
+                </button>
+              </div>
+            ) : (
+              <div className="form-card">
+                <h3 style={{ fontSize:14, fontWeight:700 }}>JSON Language Pack Definition</h3>
+                <textarea
+                  className="form-textarea"
+                  style={{ minHeight: 220 }}
+                  placeholder={`{\n  "language_code": "it",\n  "language_name": "Italiano",\n  "bad_words": ["stronzo", "cazzo", "merda"],\n  "suffix_rules": ["zione", "mente"],\n  "version": "1.0.0"\n}`}
+                  value={jsonStr}
+                  onChange={e => setJsonStr(e.target.value)}
+                />
+                <button className="btn-action primary" onClick={handleRegister} disabled={loading || !jsonStr.trim()}>
+                  {loading ? 'Registering...' : '💾 Import & Register JSON Pack'}
+                </button>
+              </div>
+            )}
+
+            {/* Currently Active Languages List */}
+            <div style={{ marginTop:10 }}>
+              <h3 style={{ fontSize:15, fontWeight:800, marginBottom:12 }}>Active Registered Languages</h3>
+              <div className="engines-grid">
+                {languagesList.map(l => {
+                  const isBuiltin = coreBuiltins.has(l.code) || l.code.includes('+') || l.code === 'auto';
+                  return (
+                    <div key={l.code} className="engine-card">
+                      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                        <div>
+                          <span style={{ fontSize:14, fontWeight:800 }}>{l.name}</span>
+                          <span className="mono" style={{ fontSize:11, color:'var(--text-muted)', display:'block' }}>code: {l.code}</span>
+                        </div>
+                        <span className="badge-severity" style={{
+                          color: isBuiltin ? 'var(--blue)' : 'var(--green)',
+                          background: isBuiltin ? 'var(--blue-glow)' : 'var(--green-glow)',
+                          borderColor: isBuiltin ? 'var(--blue)' : 'var(--green)',
+                        }}>
+                          {l.vocabulary_size || '?'} roots
+                        </span>
+                      </div>
+                      <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+                        <div>Version: {l.version || '1.0.0'}</div>
+                        {l.description && <div>{l.description}</div>}
+                      </div>
+                      {!isBuiltin && (
+                        <button className="btn-action danger" style={{ alignSelf:'flex-start', padding:'4px 10px', fontSize:11 }} onClick={() => handleDeleteCustom(l.code)}>
+                          🗑️ Delete Pack
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     // ─── Stats View ───────────────────────────────────────────────────────────
     function StatsTab() {
       const [stats, setStats] = useState(null);
@@ -1227,12 +1554,11 @@
             <div className="stats-header-row">
               <div>
                 <h2 style={{ fontSize:18, fontWeight:800, letterSpacing:'-0.02em' }}>Engine Architecture & Metrics</h2>
-                <p style={{ fontSize:13, color:'var(--text-muted)' }}>Real-time statistics across all 11 active on-device engines</p>
+                <p style={{ fontSize:13, color:'var(--text-muted)' }}>Real-time statistics across active on-device engines</p>
               </div>
               <button className="btn-action" onClick={load}>Refresh</button>
             </div>
 
-            {/* Global Metrics Cards */}
             <div className="metrics-grid">
               <div className="metric-card">
                 <span className="metric-title">Total Text Strings Evaluated</span>
@@ -1244,11 +1570,10 @@
               </div>
               <div className="metric-card">
                 <span className="metric-title">Active World Languages</span>
-                <span className="metric-val" style={{ color: 'var(--green)' }}>11</span>
+                <span className="metric-val" style={{ color: 'var(--green)' }}>{Object.keys(engines).length}</span>
               </div>
             </div>
 
-            {/* Per-Engine Cards */}
             <div>
               <h3 style={{ fontSize:14, fontWeight:700, marginBottom:12 }}>Loaded Language Profiles</h3>
               <div className="engines-grid">
@@ -1301,12 +1626,27 @@
       const [language, setLanguage] = useState('en');
       const [threshold, setThreshold] = useState(0.6);
       const [policy, setPolicy] = useState('balanced');
+      const [languagesList, setLanguagesList] = useState(DEFAULT_LANGUAGES);
+
+      const fetchLanguages = useCallback(async () => {
+        try {
+          const res = await apiGetLanguages();
+          if (res.languages && res.languages.length > 0) {
+            setLanguagesList(res.languages);
+          }
+        } catch (e) {
+          // Fallback to default languages
+        }
+      }, []);
+
+      useEffect(() => {
+        fetchLanguages();
+      }, [fetchLanguages]);
 
       return (
         <>
           <header className="header-bar">
             <div className="header-content">
-              {/* Brand */}
               <div className="brand-section" onClick={() => setActiveTab('chat')}>
                 <div className="brand-icon">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1319,7 +1659,6 @@
                 </div>
               </div>
 
-              {/* Segmented Tab Bar positioned prominently in center */}
               <div className="nav-segmented">
                 <button
                   className={`nav-tab ${activeTab === 'chat' ? 'active' : ''}`}
@@ -1334,19 +1673,24 @@
                   <span>📋 Batch Testing</span>
                 </button>
                 <button
+                  className={`nav-tab ${activeTab === 'builder' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('builder')}
+                >
+                  <span>➕ Add / Builder</span>
+                </button>
+                <button
                   className={`nav-tab ${activeTab === 'stats' ? 'active' : ''}`}
                   onClick={() => setActiveTab('stats')}
                 >
-                  <span>📊 Architecture & Stats</span>
+                  <span>📊 Architecture</span>
                 </button>
               </div>
 
-              {/* Controls (Language & Sensitivity Threshold) */}
               <div className="controls-group">
                 <div className="select-pill">
                   <select value={language} onChange={e => setLanguage(e.target.value)}>
-                    {LANGUAGES.map(l => (
-                      <option key={l.code} value={l.code}>{l.flag} {l.name}</option>
+                    {languagesList.map(l => (
+                      <option key={l.code} value={l.code}>🌐 {l.name}</option>
                     ))}
                   </select>
                 </div>
@@ -1376,9 +1720,10 @@
           </header>
 
           <main className="app-main">
-            {activeTab === 'chat'  && <ChatTab  language={language} setLanguage={setLanguage} threshold={threshold} policy={policy} />}
-            {activeTab === 'batch' && <BatchTab language={language} threshold={threshold} policy={policy} />}
-            {activeTab === 'stats' && <StatsTab />}
+            {activeTab === 'chat'    && <ChatTab  language={language} setLanguage={setLanguage} threshold={threshold} policy={policy} languagesList={languagesList} />}
+            {activeTab === 'batch'   && <BatchTab language={language} threshold={threshold} policy={policy} />}
+            {activeTab === 'builder' && <LanguageBuilderTab onLanguageAdded={langCode => setLanguage(langCode)} languagesList={languagesList} refreshLanguages={fetchLanguages} />}
+            {activeTab === 'stats'   && <StatsTab />}
           </main>
         </>
       );

@@ -15,6 +15,7 @@ from lpte.core.normalizer import TextNormalizer
 from lpte.core.tokenizer import Tokenizer, TokenizationResult
 from lpte.core.profile import LanguageProfile
 from lpte.core.loader import LanguagePackLoader
+from lpte.core.registry import LanguageRegistry, default_registry
 from lpte.core.cache import LRUCache
 from lpte.core.multilang import MultiLangEngine, detect_scripts
 from lpte.eval import EVAL_SETS, EvalReport, evaluate, evaluate_all, overall
@@ -42,6 +43,8 @@ __all__ = [
     "TokenizationResult",
     "LanguageProfile",
     "LanguagePackLoader",
+    "LanguageRegistry",
+    "default_registry",
     "LRUCache",
     # Evaluation
     "evaluate",
