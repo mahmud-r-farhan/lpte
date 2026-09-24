@@ -55,11 +55,37 @@ _KOREAN_BAD_WORDS: set[str] = {
     "쓰레기", "폐기물", "패륜아", "틀딱", "한남충", "메갈", "일베",
 }
 
+# ─── Content Categories ───────────────────────────────────────────────────────
+# Slurs and threats escalate severity; profanity is the default.
+_KOREAN_WORD_CATEGORIES: dict[str, str] = {
+    **{w: "threat" for w in (
+        "죽어", "죽여", "뒤져", "뒤져라",
+    )},
+    **{w: "slur" for w in (
+        "병신", "븅신", "병신새끼", "등신", "한남충", "메갈",
+        "일베", "쌍놈", "쌍년", "화냥년", "창녀", "걸레",
+        "패륜아",
+    )},
+    **{w: "sexual" for w in (
+        "씹", "씹창", "씹새", "씹새끼", "씹자식", "좆",
+        "좆까", "좆같", "좆만한", "좆나", "존나", "졸라",
+        "좆밥", "보지", "자지",
+    )},
+    **{w: "insult" for w in (
+        "개새끼", "새끼", "개자식", "개련", "개놈", "개년",
+        "개소리", "지랄", "지랄하네", "염병", "옘병", "엠창",
+        "미친놈", "미친년", "미친새끼", "또라이", "미친", "닥쳐",
+        "닥쳐라", "꺼져", "꺼져라", "쓰레기", "폐기물", "틀딱",
+        "호구",
+    )},
+}
+
 KoreanProfile = LanguageProfile(
     language_code="ko",
     language_name="한국어 (Korean)",
     bad_words=_KOREAN_BAD_WORDS,
     stemmer=KoreanStemmer(),
+    word_categories=_KOREAN_WORD_CATEGORIES,
     context_rules={
         "쓰레기": {"쓰레기통", "쓰레기봉투", "분리수거"},
         "개": {"강아지", "개과", "사냥개", "안내견"},

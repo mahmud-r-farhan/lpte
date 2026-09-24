@@ -63,6 +63,12 @@ def _validate_pack(data: dict[str, Any], source: str = "<unknown>") -> None:
             f"got {type(data['context_rules']).__name__}"
         )
 
+    if "word_categories" in data and not isinstance(data["word_categories"], dict):
+        raise ValueError(
+            f"Language pack '{source}': 'word_categories' must be a dict, "
+            f"got {type(data['word_categories']).__name__}"
+        )
+
     if "min_word_length" in data:
         mwl = data["min_word_length"]
         if not isinstance(mwl, int) or mwl < 1:
@@ -211,6 +217,10 @@ class LanguagePackLoader:
             k: set(v) for k, v in data.get("context_rules", {}).items()
         }
 
+        word_categories = {
+            str(k): str(v) for k, v in data.get("word_categories", {}).items()
+        }
+
         return LanguageProfile(
             language_code=data["language_code"],
             language_name=data["language_name"],
@@ -218,6 +228,7 @@ class LanguagePackLoader:
             stemmer=stemmer,
             context_rules=context_rules,
             min_word_length=data.get("min_word_length", 2),
+            word_categories=word_categories,
             version=data.get("version", "1.0.0"),
             description=data.get("description", ""),
             author=data.get("author", ""),

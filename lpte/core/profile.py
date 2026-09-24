@@ -34,6 +34,11 @@ class LanguageProfile:
     stemmer: Stemmer
     context_rules: dict[str, set[str]] = field(default_factory=dict)
     min_word_length: int = 2
+    # Optional content-category mapping: bad word → category.
+    # Known categories: "profanity" (default when absent), "slur",
+    # "threat", "sexual". Slur/threat matches escalate severity by one
+    # level and can drive per-category moderation policy thresholds.
+    word_categories: dict[str, str] = field(default_factory=dict)
     # Optional metadata
     version: str = "1.0.0"
     description: str = ""
