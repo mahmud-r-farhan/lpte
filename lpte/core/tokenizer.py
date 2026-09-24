@@ -1,97 +1,77 @@
-"""
-Tokenizer — segments normalized text into analyzable tokens.
+"""Tokenization with stable normalized-text offsets.
 
-Supports:
-- Word-boundary splitting
-- CJK (Chinese, Japanese, Korean) sub-phrase and n-gram segmentation
-- Word-level n-gram generation (bigrams, trigrams)
-- Character-level n-gram generation for obfuscation detection
+For unspaced Han/Kana text we generate only the character-window lengths
+present in the engine's vocabulary (the public default remains 1..5).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
+
+_WORD_RE = re.compile(r"\S+")
 
 
 @dataclass(frozen=True)
 class TokenizationResult:
-    """Result of tokenizing a text string."""
-
     words: list[str]
     bigrams: list[str]
     trigrams: list[str]
     raw_normalized: str
+    word_spans: list[tuple[int, int]] = field(default_factory=list)
+    base_count: int = 0
 
 
 def _is_cjk_or_kana(c: str) -> bool:
-    """Check if character is a CJK ideograph, Hiragana, or Katakana."""
     code = ord(c)
     return (
-        0x4E00 <= code <= 0x9FFF     # CJK Unified Ideographs
-        or 0x3040 <= code <= 0x309F  # Hiragana
-        or 0x30A0 <= code <= 0x30FF  # Katakana
-        or 0x31F0 <= code <= 0x31FF  # Katakana Phonetic Extensions
-        or 0x3400 <= code <= 0x4DBF  # CJK Unified Ideographs Extension A
-        or 0xF900 <= code <= 0xFAFF  # CJK Compatibility Ideographs
-        or 0x20000 <= code <= 0x2A6DF # Extension B
+        0x4E00 <= code <= 0x9FFF
+        or 0x3040 <= code <= 0x30FF
+        or 0x31F0 <= code <= 0x31FF
+        or 0x3400 <= code <= 0x4DBF
+        or 0xF900 <= code <= 0xFAFF
+        or 0x20000 <= code <= 0x2FA1F
     )
 
 
 class Tokenizer:
-    """Splits normalized text into tokens and n-grams."""
+    def __init__(self, cjk_lengths: tuple[int, ...] | None = None) -> None:
+        self.cjk_lengths = cjk_lengths if cjk_lengths is not None else (1, 2, 3, 4, 5)
 
     def tokenize(self, normalized_text: str) -> TokenizationResult:
-        """
-        Tokenize normalized text.
-
-        Args:
-            normalized_text: Already-normalized lowercase text.
-
-        Returns:
-            TokenizationResult with words, bigrams, trigrams.
-        """
-        base_words = self._split_words(normalized_text)
+        base = list(_WORD_RE.finditer(normalized_text))
+        base_words = [m.group() for m in base]
         words = list(base_words)
-
-        # For unspaced East Asian scripts (CJK/Kana), generate sub-phrase & n-gram tokens
-        for w in base_words:
-            if any(_is_cjk_or_kana(c) for c in w):
-                for n in range(1, min(len(w) + 1, 6)):
-                    for i in range(len(w) - n + 1):
-                        gram = w[i : i + n]
-                        if gram not in words:
-                            words.append(gram)
-
-        bigrams = self._generate_ngrams(base_words, 2)
-        trigrams = self._generate_ngrams(base_words, 3)
-
+        spans = [m.span() for m in base]
+        for match in base if self.cjk_lengths else ():
+            w = match.group()
+            if not any(_is_cjk_or_kana(c) for c in w):
+                continue
+            for length in self.cjk_lengths:
+                if length > len(w):
+                    continue
+                for i in range(len(w) - length + 1):
+                    # The entire token has already been added above.
+                    if i == 0 and length == len(w):
+                        continue
+                    words.append(w[i : i + length])
+                    spans.append((match.start() + i, match.start() + i + length))
         return TokenizationResult(
-            words=words,
-            bigrams=bigrams,
-            trigrams=trigrams,
-            raw_normalized=normalized_text,
+            words,
+            self._generate_ngrams(base_words, 2),
+            self._generate_ngrams(base_words, 3),
+            normalized_text,
+            spans,
+            len(base),
         )
 
     def character_ngrams(self, word: str, min_n: int = 2, max_n: int = 4) -> list[str]:
-        """
-        Generate character-level n-grams from a single word.
-
-        Used for detecting partial obfuscation within words.
-        """
-        grams: list[str] = []
-        for n in range(min_n, max_n + 1):
-            if len(word) < n:
-                continue
-            for i in range(len(word) - n + 1):
-                grams.append(word[i : i + n])
-        return grams
+        return [word[i : i + n] for n in range(min_n, max_n + 1) for i in range(len(word) - n + 1)]
 
     @staticmethod
     def _split_words(text: str) -> list[str]:
-        return [w for w in text.split() if w]
+        return text.split()
 
     @staticmethod
     def _generate_ngrams(words: list[str], n: int) -> list[str]:
-        if len(words) < n:
-            return []
         return [" ".join(words[i : i + n]) for i in range(len(words) - n + 1)]

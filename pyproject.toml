@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lpte"
-version = "1.0.0"
+version = "1.2.0"
 description = "Open-Source Local Profanity & Toxicity Engine — zero-cost, on-device text analysis"
 readme = "README.md"
 license = "MIT"
@@ -27,9 +27,12 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/lpte/lpte"
-Repository = "https://github.com/lpte/lpte"
-Issues = "https://github.com/lpte/lpte/issues"
+Homepage = "https://github.com/mahmud-r-farhan/lpte"
+Repository = "https://github.com/mahmud-r-farhan/lpte"
+Issues = "https://github.com/mahmud-r-farhan/lpte/issues"
+
+[project.scripts]
+lpte = "lpte.cli:main"
 
 [project.optional-dependencies]
 dev = [

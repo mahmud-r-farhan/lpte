@@ -1,0 +1,33 @@
+name: Python and language packs
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install core, development tools and optional web test dependencies
+        run: |
+          python -m pip install -e '.[dev]'
+          python -m pip install -r website/requirements.txt httpx
+      - name: Python tests (including optional HTTP API)
+        run: pytest -q
+      - name: Validate checked-in JSON language packs
+        run: lpte validate languages/
+      - name: Hand-written regression corpus floor (not production accuracy)
+        run: lpte eval --fail-under 0.98
+      - name: Style and import checks
+        run: |
+          ruff check lpte website/app.py
+          ruff format --check lpte website/app.py

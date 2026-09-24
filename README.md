@@ -1,321 +1,139 @@
 # LPTE — Local Profanity & Toxicity Engine
 
-**Zero-cost, high-performance, on-device text toxicity analysis.**
+An **offline, rule-based** Python 3.9+ moderation engine. The core library and CLI have no third-party runtime dependencies. It detects vocabulary and obfuscations; a separate policy determines whether to **ALLOW**, **FLAG**, **MASK** or **BLOCK**. It is not a semantic classifier, a calibrated probability estimate, or a guarantee of safe content.
 
-LPTE is an open-source Python library for detecting and filtering toxic, profane, and offensive text — running entirely on-device with zero cloud dependency. Initially optimized for Bengali, with a plug-and-play language pack system for instant localization.
+## What is implemented
 
-## Features
+- Eleven built-in profiles: English (`en`), Bengali (`bn`), Chinese (`zh`), Japanese (`ja`), Korean (`ko`), Russian (`ru`), Spanish (`es`), Hindi (`hi`), French (`fr`), German (`de`), Arabic (`ar`). A JSON pack can add another language without editing code.
+- Exact, inflected, multi-word, alias, split-word and indexed edit-distance-one matches. Unicode script routing for mixed-language messages. Benign-compound rules suppress **only covered occurrences**, not an unrelated violation elsewhere in the message.
+- Per-term categories (`profanity`, `insult`, `sexual`, `slur`, `threat`), severity and reusable strict/balanced/lenient moderation policies. Category thresholds are independent of the binary detection threshold.
+- Original-surface masking, including `f4ck`, `f.u.c.k`, `f u c k`, `shiiit` and zero-width insertion; threshold-free, bounded, thread-safe evidence cache; batch and asyncio APIs.
+- `lpte` CLI (`analyze`, `sanitize`, streaming `batch`, `languages`, `init-pack`, `validate`, `eval`, `bench`) and optional FastAPI demo.
 
-- **100% Offline** — No network calls, no cloud APIs, no data leaving the device
-- **<25ms Latency** — Sub-25ms per text string evaluation with built-in LRU caching
-- **11 Built-in Languages** — English, Bengali, Chinese, Japanese, Korean, Russian, Spanish, Hindi, French, German, Arabic
-- **Bypass-Resistant** — Catches leetspeak, character insertion, zero-width chars, homoglyphs, word splitting
-- **Stemming** — Language-aware suffix, particle, and affix stripping across Latin, Cyrillic, Devanagari, Bengali, Arabic, Hangul, Kana, and CJK
-- **Batch & HTML Support** — Process batches or raw HTML directly with tag stripping
-- **Zero Dependencies** — Pure Python, no external packages required
-- **Pluggable Architecture** — Drop in a JSON language file, no code changes needed
-
-## Supported Languages
-
-| Code | Language | Native | Built-in Pack | JSON Pack | Stemmer |
-|------|----------|--------|---------------|-----------|---------|
-| `en` | English | English | `EnglishProfile` | `en_profile.json` | Suffix stemmer |
-| `bn` | Bengali | বাংলা | `BengaliProfile` | `bn_profile.json` | Inflection stemmer |
-| `zh` | Chinese | 中文 | `ChineseProfile` | `zh_profile.json` | Particle stemmer |
-| `ja` | Japanese | 日本語 | `JapaneseProfile` | `ja_profile.json` | Particle & polite stemmer |
-| `ko` | Korean | 한국어 | `KoreanProfile` | `ko_profile.json` | Josa & Eomi stemmer |
-| `ru` | Russian | Русский | `RussianProfile` | `ru_profile.json` | Cyrillic stemmer |
-| `es` | Spanish | Español | `SpanishProfile` | `es_profile.json` | Suffix stemmer |
-| `hi` | Hindi | हिन्दी | `HindiProfile` | `hi_profile.json` | Devanagari stemmer |
-| `fr` | French | Français | `FrenchProfile` | `fr_profile.json` | Suffix stemmer |
-| `de` | German | Deutsch | `GermanProfile` | `de_profile.json` | Suffix stemmer |
-| `ar` | Arabic | العربية | `ArabicProfile` | `ar_profile.json` | Affix stemmer |
-
-## Platform Support
-
-| Platform | Language | Package | Status |
-|----------|----------|---------|--------|
-| **Python** | Python 3.9+ | `pip install lpte` | Core engine |
-| **Flutter** | Dart | `lpte_flutter` | Plugin ready |
-| **Android** | Kotlin | `lpte-android` | Wrapper ready |
-| **iOS** | Swift | `LpteModule` | Bridge ready |
-| **React Native** | TypeScript | `lpte-react-native` | Plugin ready |
-| **Node.js** | TypeScript | `lpte` (npm) | Module ready |
-| **Go** | Go 1.21+ | `github.com/lpte/lpte` | Bindings ready |
-| **Rust** | Rust 2021 | `lpte` (crates) | Bindings ready |
-| **.NET/C#** | C# / .NET 7+ | `Lpte` (NuGet) | Wrapper ready |
-| **PHP** | PHP 8.0+ | `lpte/lpte` (Composer) | Wrapper ready |
-
-All platform wrappers communicate with the Python core engine via subprocess IPC, with optional embedded Python for production deployments.
-
-## Quick Start
-
-### Install
+### Install from this checkout
 
 ```bash
-pip install lpte
+python -m pip install .                 # core + lpte CLI; Python 3.9+
+python -m pip install -e '.[dev]'      # pytest/ruff for contributors
 ```
 
-### Python
+For an air-gapped deployment, install from a local wheel; the engine itself never calls the network. The **hosted web demo is not on-device**: its browser sends text to the demo server, and its JavaScript/fonts use CDNs. Do not paste sensitive content there.
+
+## Python: detect → decide → remediate
 
 ```python
-from lpte import LpteEngine
-from lpte.languages import EnglishProfile, ChineseProfile, RussianProfile, BengaliProfile
+from lpte import Action, LpteEngine, MultiLangEngine, get_policy
+from lpte.languages import EnglishProfile, BengaliProfile
 
-# English
-engine_en = LpteEngine(EnglishProfile)
-result = engine_en.analyze("some text here")
-if result.is_toxic:
-    print(f"Toxic: {result.severity.name} ({result.confidence:.2f})")
+engine = LpteEngine(EnglishProfile, cache_size=2048)  # construct once per worker
+policy = get_policy("balanced")  # or "strict" / "lenient"
+text = "you are a fucking idiot"
+result = engine.analyze(text)
+decision = policy.decide(result, text)  # supply text for custom denylist terms
 
-# Chinese
-engine_zh = LpteEngine(ChineseProfile)
-result_zh = engine_zh.analyze("草泥马 傻逼")
+print(result.is_toxic, result.matched_terms, result.categories)
+# True ['fuck', 'idiot'] ['profanity', 'insult']
+print(decision.action)  # Action.MASK
 
-# Russian
-engine_ru = LpteEngine(RussianProfile)
-result_ru = engine_ru.analyze("сука блять")
-
-# Batch analysis
-results = engine_en.batch_analyze(["hello world", "you fucking idiot"])
-
-# HTML text analysis
-result = engine_en.analyze_html("<b>hello</b> f*ck")
-
-# Sanitize
-clean = engine_en.sanitize("you are a bastard")
-# → "you are a *******"
+if decision.action == Action.BLOCK:
+    reject_message()
+elif decision.action == Action.MASK:
+    publish(engine.sanitize(text))  # "you are a ******* *****"
+else:
+    publish(text)                     # ALLOW or FLAG; enqueue FLAG for review
 ```
 
-### Bengali
+`result.confidence` is a **rule score**, not the probability that a person is abusive. A single exact match scores 0.8; an inflection or multi-word phrase typically scores 0.7. Slurs and targeted threats escalate severity and BLOCK under all presets **when a matching rule fires**. Context and community norms still need review.
+
+| Input | Match category | Balanced | Lenient |
+|---|---|---|---|
+| `damn this is good` | profanity | MASK | ALLOW |
+| `you are so stupid and ugly` | targeted insult | MASK | FLAG |
+| `you nigger` | slur | BLOCK | BLOCK |
+| `I will kill you` | targeted threat | BLOCK | BLOCK |
+| `please kill the background process` | none | ALLOW | ALLOW |
+
+### Code-switched chat, batches, async, HTML
 
 ```python
-from lpte import LpteEngine
-from lpte.languages import BengaliProfile
+mixed = MultiLangEngine([BengaliProfile, EnglishProfile])
+mixed.analyze("তুই একদম idiot").matched_terms  # ['idiot']
+mixed.sanitize("কুত্তা and f4ck")             # '****** and ****'
+results = mixed.batch_analyze(["hello", "কুত্তা", "f4ck"])
+result = await mixed.analyze_async("তুই একদম idiot")
+results = await mixed.batch_analyze_async(["hello", "f4ck"])
 
-engine = LpteEngine(BengaliProfile)
-result = engine.analyze("বাংলা টেক্সট")
+# Text extraction only, NOT safe HTML rendering/sanitization:
+plain_result = LpteEngine(EnglishProfile).analyze_html("<b>f4ck</b>")
 ```
 
-### Custom Language via JSON
+Script routing skips unrelated packs (e.g., pure Bengali text in `bn+en` does not run English). `auto` loads every available pack; Latin-script packs may all run for Latin text. Do not instantiate new engines per message.
 
-```python
-from lpte import LpteEngine, LanguagePackLoader
-
-# Load from JSON file
-profile = LanguagePackLoader.load_file("es_profile.json")
-engine = LpteEngine(profile)
-
-# Or from JSON string
-import json
-profile = LanguagePackLoader.load_json(json.dumps({
-    "language_code": "es",
-    "language_name": "Español",
-    "bad_words": ["puta", "mierda", "joder"],
-    "suffix_rules": ["ción", "mente", "ado", "es", "s"],
-}))
-engine = LpteEngine(profile)
-```
-
-### Flutter
-
-```dart
-import 'package:lpte_flutter/lpte_flutter.dart';
-
-final result = await LpteFlutter.analyze(
-  'some text',
-  languageCode: 'bn',
-);
-
-if (result.isToxic) {
-  print('Toxic: ${result.severity}');
-}
-```
-
-### Web Demo
+### CLI / CI
 
 ```bash
-# Install dependencies
-pip install fastapi uvicorn
-
-# Run the web demo
-python website/app.py
-
-# Visit http://localhost:8000
+lpte analyze "you are a fucking idiot" --policy balanced --json
+lpte analyze "তুই একদম idiot" --lang bn+en --sanitize
+lpte sanitize "f4ck this bullsh1t" --mask '#'
+lpte batch comments.txt --policy strict --json > report.json  # streamed JSON
+cat comments.txt | lpte batch - --lang auto --json > report.json
+lpte languages --json
+lpte validate languages/                # all *_profile.json files, fail fast
+lpte eval --lang en --verbose
+lpte eval --fail-under 0.98             # regression gate, NOT external accuracy
+lpte bench --iterations 200             # cache disabled by default
+lpte bench --iterations 200 --cache     # warmed cache, different workload
 ```
 
-The web demo includes a chat-like interface where you can test toxicity detection in real-time. Type messages, try bypass tricks (leetspeak, dot separators, word splitting), and see how the engine responds.
+`batch` reads one non-empty UTF-8 line at a time (memory is bounded by its output stream and engine cache); output JSON contains `results`, `total`, `toxic_count`, and `total_latency_ms`. Errors go to stderr with non-zero exit codes. `--threshold` accepts only finite values in `[0, 1]`; at 0, clean text is **still clean**.
 
-## Architecture
+## Data-only language and rule pipeline
 
-```
-lpte/
-├── lpte/                      # Python package
-│   ├── core/
-│   │   ├── normalizer.py      # Unicode normalization, leet reversal, zero-width stripping
-│   │   ├── tokenizer.py       # Word splitting, n-gram generation
-│   │   ├── classifier.py      # Multi-signal scoring (exact, stemmed, concat, fuzzy)
-│   │   ├── stemmer.py         # Abstract stemmer interface
-│   │   ├── profile.py         # Language profile dataclass
-│   │   ├── loader.py          # JSON-based dynamic language loading
-│   │   └── engine.py          # High-level API
-│   └── languages/
-│       ├── bn.py              # Bengali language pack (stemmer + profile)
-│       └── en.py              # English language pack (stemmer + profile)
-│
-├── languages/                 # JSON language packs (drop-in)
-│   ├── bn_profile.json        # Bengali
-│   ├── en_profile.json        # English
-│   ├── es_profile.json        # Spanish (example)
-│   └── hi_profile.json        # Hindi (example)
-│
-├── platforms/                 # Cross-platform wrappers
-│   ├── flutter/               # Flutter plugin (Dart)
-│   ├── android/               # Android wrapper (Kotlin)
-│   ├── ios/                   # iOS + React Native bridge (Swift)
-│   ├── react-native/          # React Native plugin (TypeScript)
-│   ├── nodejs/                # Node.js module (TypeScript)
-│   ├── go/                    # Go bindings
-│   ├── rust/                  # Rust bindings
-│   ├── dotnet/                # .NET/C# wrapper
-│   └── php/                   # PHP wrapper
-│
-├── tests/                     # 78 test cases
-└── example/                   # Demo application
+```bash
+lpte init-pack ur --name 'اردو' --word 'بدتمیز' --category insult \
+  --scripts Arabic --output languages
+# Edit languages/ur_profile.json to add real vocabulary, categories, aliases,
+# benign contexts and suffix_rules; also curate clean + toxic labelled cases.
+lpte validate languages/ur_profile.json
+lpte analyze 'بدتمیز' --lang ur --json
+lpte eval --lang ur --cases my_held_out_cases.jsonl --verbose
 ```
 
-## How It Works
-
-### 1. Normalization Pipeline
-
-Raw text passes through a multi-stage normalization pipeline:
-
-1. **Zero-width character stripping** — Removes invisible Unicode characters
-2. **Accent/diacritic stripping** — Normalizes accented characters
-3. **Leetspeak reversal** — `0→o`, `1→i`, `3→e`, `4→u`, `@→a`, `$→s`, etc.
-4. **Repeated character collapse** — `fuuuuck` → `fu` (2 chars)
-5. **Character sanitization** — Strips non-alphanumeric (preserves Bengali)
-6. **Case folding** — Lowercase normalization
-
-### 2. Tokenization
-
-Normalized text is split into words, then analyzed at multiple granularities:
-
-- **Word tokens** — Individual words for exact matching
-- **Bigrams** — Word pairs for detecting split-word bypasses
-- **Trigrams** — Word triples for longer phrase detection
-- **Character n-grams** — For fragment-based obfuscation detection
-
-### 3. Multi-Signal Classification
-
-Four independent signals contribute to a weighted score:
-
-| Signal | Weight | Description |
-|--------|--------|-------------|
-| Exact match | 1.0 | Direct root-word match |
-| Stemmed match | 0.85 | Match after suffix stripping |
-| N-gram match | 0.7 | Bigram/trigram overlap detection |
-| Fragment match | 0.4 | Character-level partial matches |
-
-The weighted score is normalized to a 0–1 confidence value. A configurable threshold (default 0.6) determines the binary classification.
-
-## Adding a New Language
-
-### Option 1: JSON Language Pack (No Code)
-
-Create a JSON file:
+A pack's relevant fields:
 
 ```json
 {
-  "language_code": "fr",
-  "language_name": "Français",
-  "bad_words": ["word1", "word2", "word3"],
-  "context_rules": {
-    "word1": ["negator1", "negator2"]
-  },
-  "min_word_length": 2,
-  "suffix_rules": ["tion", "ment", "eur", "eux", "es", "s"]
+  "language_code": "ur",
+  "language_name": "اردو",
+  "bad_words": ["بدتمیز", "تم بدتمیز ہو"],
+  "word_categories": {"بدتمیز": "insult", "تم بدتمیز ہو": "insult"},
+  "aliases": {},
+  "context_rules": {},
+  "suffix_rules": ["وں", "یں"],
+  "scripts": ["Arabic"],
+  "min_word_length": 2
 }
 ```
 
-Load it:
-```python
-profile = LanguagePackLoader.load_file("fr_profile.json")
-engine = LpteEngine(profile)
-```
+Use genuine *normalised* vocabulary and locally reviewed examples; these illustrative phrases are not a shipped Urdu pack. `aliases` maps a variant/romanisation to a term in `bad_words` (English examples: `fcking → fuck`); `context_rules` lists **known benign forms containing a term**, not a generic negation list. `scripts` can be omitted (inferred from words/aliases). The CLI discovers new packs in `./languages`; built-in native stemmers take precedence for duplicate codes. Use `--packs-dir PATH` to explicitly load another directory and override an existing code. In Python, call `LanguagePackLoader.load_file(path)` then `LpteEngine(profile)` or `available_languages(path, override=True)`. For the web demo, set `LPTE_PACKS_DIR` before startup. Changes take effect **after rebuilding engines/restarting the service**; mutating a live profile does not rebuild its indexes.
 
-### Option 2: Python Implementation (Full Control)
+Validation rejects missing/unknown fields, invalid categories, dangling aliases, bad context data, malformed suffixes/scripts, and duplicate entries. `lpte init-pack` refuses to overwrite an existing file. Add a reviewed JSONL corpus with one `{"text": "…", "toxic": true/false}` per line, then put pack validation, evaluation and tests in CI (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
-```python
-from lpte.core.stemmer import Stemmer
-from lpte.core.profile import LanguageProfile
+## Evaluation & performance (read before deploying)
 
-class FrenchStemmer(Stemmer):
-    def stem(self, word: str) -> str:
-        # Your stemming logic here
-        return word
+The included **83 hand-written examples across 11 languages** are a regression guard, **not** independent validation: they overlap with lexicon development. As of this patch, `lpte eval` reports overall F1 **0.989** with one known English false negative (`no one likes you, go away`). A separate held-out, representative sample from *your* traffic is required to estimate production false-positive rates, harm-category recall or fairness. Keep raw user text on your infrastructure.
 
-FrenchProfile = LanguageProfile(
-    language_code="fr",
-    language_name="Français",
-    bad_words={"word1", "word2"},
-    stemmer=FrenchStemmer(),
-)
-```
+`lpte bench --iterations 200` on this workspace (Python 3.11, six fixed strings incl. a 200-word clean text, cache **disabled**) measured ~0.27 ms mean, ~1.24 ms p95 and ~3,666 analyses/sec. This is a local example, **not a service-level guarantee**. Run it on target hardware with realistic messages; warm-cache numbers are much faster but do not represent unseen text. The fuzzy index, Unicode category/stem memoization, suffix buckets for JSON packs, script routing and bounded caches keep cost from scaling with the full dictionary for every token.
 
-## Testing
+See [REAL_WORLD_USECASES.md](REAL_WORLD_USECASES.md) for deployment patterns, rollout/measurement steps and limitations, and [ROADMAP.md](ROADMAP.md) for work still outstanding.
+
+### Optional HTTP demo and existing wrappers
 
 ```bash
-# Install dev dependencies
-pip install -e ".[dev]"
-
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=lpte --cov-report=term-missing
-
-# Run specific test suite
-pytest tests/test_bypass_tricks.py -v
+python -m pip install -r website/requirements.txt
+python website/app.py                  # same-origin UI + /api/* on port 8000
 ```
 
-The test suite covers:
-- **78 test cases** across all modules
-- Bypass trick detection (leetspeak, zero-width, word splitting, etc.)
-- False positive prevention (clean words containing profanity substrings)
-- Bengali stemmer validation
-- English stemmer validation
-- JSON language pack loading
-- Performance budget verification (<25ms)
+The HTTP API accepts optional `policy` (`strict`, `balanced`, `lenient`) and `language` (single code, `bn+en`/another pair, or `auto`); request size and threshold are validated. Unknown languages return 400 rather than silently falling back. The bundled UI loads React/Babel/fonts from external CDNs; **the Python core/CLI do not**. For sensitive text, use the in-process API or self-host a privacy-reviewed UI. Platform wrappers under `platforms/` are legacy subprocess examples (not tested for parity with these v1.2 moderation APIs); review and test them before production use.
 
-## Performance
-
-Target: **<25ms per text evaluation** on standard hardware.
-
-The engine achieves this through:
-- HashMap-based O(1) word lookups
-- Pure Python with no external dependencies
-- Minimal object allocation in hot paths
-- Pre-computed suffix tables for stemming
-
-## Live Demo
-
-**[https://lpte-demo.onrender.com](https://lpte-demo.onrender.com)**
-
-Try the interactive web demo — type messages, test bypass tricks, and see real-time toxicity detection in action.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-## License
-
-MIT License — see [LICENSE](LICENSE).
-
-## Credits
-
-Built for the open-source community. Contributions welcome for:
-- New language packs
-- Improved stemmers
-- Platform-specific optimizations
-- Bypass detection patterns
+MIT license: [LICENSE](LICENSE). Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).

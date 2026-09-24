@@ -1,236 +1,268 @@
-"""
-Text normalization pipeline.
+"""Multilingual, obfuscation-aware normalization (and optional source offsets).
 
-Handles:
-- Unicode NFKC normalization
-- Zero-width / invisible character stripping (category-aware)
-- Homoglyph normalization (for mixed-script Latin obfuscation: fаck → fuck)
-- Leetspeak reversal (0→o, 1→i, @→a, $→s, etc.)
-- Dot/dash separator collapsing for single-char sequences (f.u.c.k → fuck)
-- Repeated character collapse
-- Combining accent stripping (Latin/European diacritics)
-- Case folding
-- Universal multilingual character preservation (supports Indic, Arabic, Cyrillic, CJK, Latin)
+The fast string-only path is used during analysis. The offset-preserving path
+runs only for sanitization, where mapping a detected normalized token back to
+its original surface form is essential (f4ck, f.u.c.k, zero-width, etc.).
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import dataclass
+from functools import lru_cache
 
-
-# ─── Leet Mappings ────────────────────────────────────────────────────────────
-
-# Primary leet mappings (@ already covers 'a', so 4 → u for "f4ck" → "fuck")
-_LEET_MAP: dict[str, str] = {
-    "0": "o", "1": "i", "3": "e", "4": "u",
-    "5": "s", "7": "t", "@": "a", "$": "s",
-    "!": "i", "+": "t", "8": "b", "9": "g",
-    "¥": "y", "€": "e", "£": "l",
+_LEET_MAP = {
+    "0": "o",
+    "1": "i",
+    "3": "e",
+    "4": "u",
+    "5": "s",
+    "7": "t",
+    "@": "a",
+    "$": "s",
+    "8": "b",
+    "9": "g",
+    "¥": "y",
+    "€": "e",
+    "£": "l",
 }
-
-# Alternative leet mappings for ambiguous chars (used in secondary pass)
-_LEET_ALTERNATIVES: dict[str, list[str]] = {
-    "4": ["a", "u"],     # "f4ck" could be "fuck" or "face"
-    "@": ["a", "u"],     # "@" could map to either
+_LEET_TRANSLATE = str.maketrans(_LEET_MAP)
+_LEET_ALTERNATIVES = {"4": "a", "@": "u"}
+_ALT_TRANSLATE = {
+    key: str.maketrans({**_LEET_MAP, key: value}) for key, value in _LEET_ALTERNATIVES.items()
 }
-
-# ─── Homoglyph Map ────────────────────────────────────────────────────────────
-# Common Unicode homoglyphs used to obfuscate ASCII/Latin words
-_HOMOGLYPH_MAP: dict[str, str] = {
-    # Cyrillic lookalikes
-    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "х": "x",
-    "у": "y", "і": "i", "ѕ": "s", "ј": "j", "ԁ": "d",
-    # Greek lookalikes
-    "ο": "o", "ρ": "p", "ν": "v", "υ": "u", "α": "a", "ε": "e",
-    # Latin Extended lookalikes
-    "ı": "i", "ĺ": "l", "ľ": "l",
-    # Mathematical / fullwidth
-    "ａ": "a", "ｂ": "b", "ｃ": "c", "ｄ": "d", "ｅ": "e",
-    "ｆ": "f", "ｇ": "g", "ｈ": "h", "ｉ": "i", "ｊ": "j",
-    "ｋ": "k", "ｌ": "l", "ｍ": "m", "ｎ": "n", "ｏ": "o",
-    "ｐ": "p", "ｑ": "q", "ｒ": "r", "ｓ": "s", "ｔ": "t",
-    "ｕ": "u", "ｖ": "v", "ｗ": "w", "ｘ": "x", "ｙ": "y", "ｚ": "z",
+_INLINE_LEET_RE = re.compile(r"(?<=[a-zA-Z0-9])[!+](?=[a-zA-Z0-9])")
+_HOMOGLYPH_MAP = {
+    "а": "a",
+    "е": "e",
+    "о": "o",
+    "р": "p",
+    "с": "c",
+    "х": "x",
+    "у": "y",
+    "і": "i",
+    "ѕ": "s",
+    "ј": "j",
+    "ԁ": "d",
+    "ο": "o",
+    "ρ": "p",
+    "ν": "v",
+    "υ": "u",
+    "α": "a",
+    "ε": "e",
+    "ı": "i",
+    "ĺ": "l",
+    "ľ": "l",
+    **{chr(i): chr(i - 0xFF41 + ord("a")) for i in range(0xFF41, 0xFF5B)},
+    **{chr(i): chr(i - 0xFF21 + ord("a")) for i in range(0xFF21, 0xFF3B)},
 }
-
-# ─── Zero-width Characters ────────────────────────────────────────────────────
-# Explicit set of known invisible Unicode characters
-_ZERO_WIDTH_CHARS: frozenset[str] = frozenset({
-    "\u200B",  # zero-width space
-    "\u200C",  # zero-width non-joiner
-    "\u200D",  # zero-width joiner
-    "\u200E",  # left-to-right mark
-    "\u200F",  # right-to-left mark
-    "\u2060",  # word joiner
-    "\uFEFF",  # zero-width no-break space (BOM)
-    "\u00AD",  # soft hyphen
-    "\u034F",  # combining grapheme joiner
-    "\u2800",  # braille pattern blank
-    "\u180E",  # mongolian vowel separator
-    "\u00A0",  # non-breaking space → normalize to regular space
-})
-
-# Unicode "format" category — catches future invisible chars
-_FORMAT_CATEGORY = "Cf"
-
-# ─── Regex Patterns ───────────────────────────────────────────────────────────
-
-# Latin combining accent pattern only (preserves Indic/Arabic combining marks)
-_LATIN_ACCENT_RE = re.compile(
-    r"[\u0300-\u036f\u1AB0-\u1AFF\u1DC0-\u1DFF\u20D0-\u20FF\uFE20-\uFE2F]"
+_HOMOGLYPH_TRANSLATE = str.maketrans(_HOMOGLYPH_MAP)
+_ZERO_WIDTH = frozenset(
+    {
+        "\u200b",
+        "\u200c",
+        "\u200d",
+        "\u200e",
+        "\u200f",
+        "\u2060",
+        "\ufeff",
+        "\u00ad",
+        "\u034f",
+        "\u2800",
+        "\u180e",
+    }
 )
+_REPEAT_3 = re.compile(r"([^\W\d_])\1{2,}")  # avoid repeated digits in IDs
+_REPEAT_2 = re.compile(r"([^\W\d_])\1+")
+# Only remove separators in isolated sequences of single characters, not in
+# ordinary punctuation, domains or hyphenated words such as 'kill-the-process'.
+_SEPARATORS = frozenset(".-_*,|/\\")
+_SEPARATED_LETTERS = re.compile(
+    r"(?<![A-Za-z0-9])(?:[A-Za-z0-9][.\-_*,|/\\]){2,}[A-Za-z0-9](?![A-Za-z0-9])"
+)
+_NONSPACE = re.compile(r"\S+")
 
-# Repeated character patterns
-_REPEAT_3PLUS_RE = re.compile(r"(.)\1{2,}")  # 3+ → 2
-_REPEAT_2PLUS_RE = re.compile(r"(.)\1+")     # 2+ → 1 (aggressive)
 
-# Dot/dash separator pattern for single-char sequences:
-# Catches "f.u.c.k", "f-u-c-k", "f*u*c*k", "f_u_c_k"
-_SEPARATOR_RE = re.compile(r"(?<=[a-zA-Z0-9])[.\-_*,|/\\](?=[a-zA-Z0-9])")
+@lru_cache(maxsize=4096)
+def _category(c: str) -> str:
+    return unicodedata.category(c)
+
+
+@dataclass(frozen=True)
+class NormalizedText:
+    text: str
+    # One half-open [start, end) range in the original string per output char.
+    offsets: tuple[tuple[int, int], ...]
+
+    def original_span(self, start: int, end: int) -> tuple[int, int]:
+        indices = self.offsets[start:end]
+        if not indices:
+            raise ValueError("empty normalized match")
+        return min(a for a, _ in indices), max(b for _, b in indices)
+
+
+def _homoglyphs(word: str) -> str:
+    if word.isascii():
+        return word
+    if any(("a" <= c.lower() <= "z") or (0xFF00 <= ord(c) <= 0xFFEF) for c in word):
+        return word.translate(_HOMOGLYPH_TRANSLATE)
+    return word
+
+
+def _separators(text: str) -> str:
+    return _SEPARATED_LETTERS.sub(
+        lambda m: "".join(c for c in m.group() if c not in _SEPARATORS), text
+    )
+
+
+def _has_alternative(text: str, symbol: str) -> bool:
+    # Do not try another reading for the numeric suffix of an ID (word4),
+    # but allow leading/embedded obfuscation (4ss, f4ck, @ss, f@ck).
+    for i, c in enumerate(text):
+        if (
+            c != symbol
+            or i + 1 == len(text)
+            or not text[i + 1].isascii()
+            or not text[i + 1].isalpha()
+        ):
+            continue
+        if i and text[i - 1].isascii() and text[i - 1].isalpha():
+            return True
+        if (
+            (i == 0 or not text[i - 1].isalnum())
+            and i + 2 < len(text)
+            and text[i + 2].isascii()
+            and text[i + 2].isalpha()
+        ):
+            return True
+    return False
 
 
 class TextNormalizer:
-    """Normalizes raw text into canonical form for toxicity analysis."""
+    """Canonicalize text without transliterating natural non-Latin scripts."""
 
     def normalize(self, text: str) -> str:
-        """
-        Run the full normalization pipeline.
-        Returns normalized lowercase string.
-        """
-        result = text
-
-        # 1. Strip zero-width / invisible characters
-        result = self._strip_zero_width(result)
-
-        # 2. Homoglyph normalization (for mixed-script obfuscation only)
-        result = self._apply_homoglyphs(result)
-
-        # 3. Unicode NFC / Latin accent stripping
-        result = _LATIN_ACCENT_RE.sub("", result)
-        result = unicodedata.normalize("NFC", result)
-
-        # 4. Leetspeak reversal
-        result = self._apply_leet_reversal(result)
-
-        # 5. Collapse dot/dash separators between single chars (f.u.c.k → fuck)
-        result = self._strip_separators(result)
-
-        # 6. Collapse repeated characters (3+ → 2)
-        result = _REPEAT_3PLUS_RE.sub(r"\1\1", result)
-
-        # 7. Multilingual sanitization: keep letters, digits, and combining marks
-        result = self._sanitize_multilingual(result)
-
-        # 8. Lowercase
-        result = result.lower()
-
-        # 9. Collapse multiple spaces
-        result = " ".join(result.split())
-
-        return result.strip()
+        return self._normalize(text)
 
     def normalize_aggressive(self, text: str) -> str:
-        """
-        Aggressive normalization — collapses ALL repeated chars to 1.
-        Used as a secondary pass when primary normalization doesn't match.
-        """
-        result = self.normalize(text)
-        result = _REPEAT_2PLUS_RE.sub(r"\1", result)
-        return result.strip()
+        return self._normalize(text, aggressive=True)
 
     def normalize_with_alternatives(self, text: str) -> list[str]:
-        """
-        Generate multiple normalized variants using alternative leet mappings.
-        Returns list of variants to try (primary first, then alternatives).
-        """
+        """Try alternate leet readings and triple-letter collapse when relevant."""
         variants = [self.normalize(text)]
+        for c in _LEET_ALTERNATIVES:
+            if _has_alternative(text, c):
+                variants.append(self._normalize(text, alternative=c))
+        if _REPEAT_3.search(text):
+            variants.append(self.normalize_aggressive(text))
+        return list(dict.fromkeys(variants))
 
-        # Find chars that have alternatives
-        alt_chars = set()
-        for c in text:
-            if c in _LEET_ALTERNATIVES:
-                alt_chars.add(c)
+    def normalize_variants_with_spans(self, text: str) -> list[NormalizedText]:
+        """Produce the same variants as above, this time with raw offsets."""
+        variants = [self._with_spans(text)]
+        for c in _LEET_ALTERNATIVES:
+            if _has_alternative(text, c):
+                variants.append(self._with_spans(text, alternative=c))
+        if _REPEAT_3.search(text):
+            variants.append(self._with_spans(text, aggressive=True))
+        seen: set[str] = set()
+        unique = []
+        for variant in variants:
+            if variant.text not in seen:
+                unique.append(variant)
+                seen.add(variant.text)
+        return unique
 
-        if alt_chars:
-            # Generate variants with one alternative at a time
-            for alt_char in alt_chars:
-                alt_map = _LEET_MAP.copy()
-                alternatives = _LEET_ALTERNATIVES[alt_char]
-                for alt in alternatives:
-                    alt_map[alt_char] = alt
-                    variant = text
-                    variant = self._strip_zero_width(variant)
-                    variant = self._apply_homoglyphs(variant)
-                    variant = _LATIN_ACCENT_RE.sub("", variant)
-                    variant = unicodedata.normalize("NFC", variant)
-                    variant = "".join(alt_map.get(c, c) for c in variant)
-                    variant = self._strip_separators(variant)
-                    variant = _REPEAT_3PLUS_RE.sub(r"\1\1", variant)
-                    variant = self._sanitize_multilingual(variant).lower().strip()
-                    variant = " ".join(variant.split())
-                    if variant and variant not in variants:
-                        variants.append(variant)
+    def _normalize(self, text: str, *, alternative: str = "", aggressive: bool = False) -> str:
+        text = "".join(
+            " " if c == "\u00a0" else c
+            for c in text
+            if c not in _ZERO_WIDTH and _category(c) != "Cf"
+        )
+        text = " ".join(_homoglyphs(w) for w in text.split())
+        # Compose decomposed accents; stripping them would turn Spanish 'año'
+        # into 'ano' and make dictionary matches depend on input encoding.
+        text = unicodedata.normalize("NFC", text)
+        text = text.translate(_ALT_TRANSLATE[alternative] if alternative else _LEET_TRANSLATE)
+        text = _INLINE_LEET_RE.sub(lambda m: "i" if m.group() == "!" else "t", text)
+        text = _separators(text)
+        text = (_REPEAT_2 if aggressive else _REPEAT_3).sub(
+            (lambda m: m.group(1)) if aggressive else (lambda m: m.group(1) * 2), text
+        )
+        text = "".join(c if _category(c)[0] in "LNM" else " " for c in text)
+        return " ".join(text.lower().split())
 
-        # Also add aggressive collapse variant
-        aggressive = self.normalize_aggressive(text)
-        if aggressive and aggressive not in variants:
-            variants.append(aggressive)
-
-        return variants
-
-    # ─── Private Helpers ──────────────────────────────────────────────────────
-
-    def _strip_zero_width(self, text: str) -> str:
-        """Strip known invisible chars + Unicode Cf (format) category."""
-        result = []
-        for c in text:
-            if c in _ZERO_WIDTH_CHARS:
+    def _with_spans(
+        self, text: str, *, alternative: str = "", aggressive: bool = False
+    ) -> NormalizedText:
+        # Parallel (character, source range) arrays keep every transformation
+        # aligned, including length-changing ones. Only used when masking.
+        chars: list[tuple[str, int, int]] = []
+        for i, c in enumerate(text):
+            if c in _ZERO_WIDTH or _category(c) == "Cf":
                 continue
-            if unicodedata.category(c) == _FORMAT_CATEGORY:
-                continue
-            # Normalize non-breaking space to regular space
-            if c == "\u00A0":
-                result.append(" ")
+            chars.append((" " if c == "\u00a0" else c, i, i + 1))
+
+        value = "".join(c for c, _, _ in chars)
+        for match in _NONSPACE.finditer(value):
+            word = match.group()
+            changed = _homoglyphs(word)
+            for i, c in enumerate(changed):
+                _, a, b = chars[match.start() + i]
+                chars[match.start() + i] = (c, a, b)
+        # NFC may compose base+combining sequences. Attribute the composed
+        # character to the full input range so nothing evades the mask.
+        groups: list[list[tuple[str, int, int]]] = []
+        for item in chars:
+            if groups and _category(item[0])[0] == "M":
+                groups[-1].append(item)
             else:
-                result.append(c)
-        return "".join(result)
+                groups.append([item])
+        chars = []
+        for group in groups:
+            norm = unicodedata.normalize("NFC", "".join(c for c, _, _ in group))
+            for c in norm:
+                chars.append((c, group[0][1], group[-1][2]))
 
-    def _apply_homoglyphs(self, text: str) -> str:
-        """
-        Apply homoglyph mappings to words that mix Latin letters with lookalikes
-        (e.g., 'fаck' with Cyrillic 'а'). Avoids altering pure Cyrillic/Greek text.
-        """
-        words = text.split()
-        normalized_words = []
-        for w in words:
-            # Check if word has Latin characters alongside lookalikes
-            has_latin = any("a" <= c.lower() <= "z" for c in w)
-            has_fullwidth = any(0xFF00 <= ord(c) <= 0xFFEF for c in w)
-            if has_latin or has_fullwidth:
-                w = "".join(_HOMOGLYPH_MAP.get(c, c) for c in w)
-            normalized_words.append(w)
-        return " ".join(normalized_words)
-
-    def _apply_leet_reversal(self, text: str) -> str:
-        return "".join(_LEET_MAP.get(c, c) for c in text)
-
-    def _strip_separators(self, text: str) -> str:
-        """
-        Remove punctuation separators between letters in single-char sequences.
-        e.g.: 'f.u.c.k' → 'fuck', 'f-u-c-k' → 'fuck'
-        """
-        return _SEPARATOR_RE.sub("", text)
-
-    def _sanitize_multilingual(self, text: str) -> str:
-        """
-        Preserve letters (L), numbers (N), and combining marks (M) across all scripts.
-        Punctuation and non-word symbols are converted to spaces.
-        """
-        res = []
-        for c in text:
-            cat = unicodedata.category(c)
-            if cat[0] in ("L", "N", "M"):
-                res.append(c)
+        # The fast path decides whether !/+ is inline *after* translating
+        # neighbouring symbols (e.g. @!t -> a!t). Use the same view here.
+        pre_leet = "".join(
+            _LEET_ALTERNATIVES[alternative] if c == alternative else _LEET_MAP.get(c, c)
+            for c, _, _ in chars
+        )
+        inline_positions = {m.start() for m in _INLINE_LEET_RE.finditer(pre_leet)}
+        chars = [
+            (("i" if c == "!" else "t"), a, b)
+            if i in inline_positions
+            else (
+                (_LEET_ALTERNATIVES[alternative] if c == alternative else _LEET_MAP.get(c, c)),
+                a,
+                b,
+            )
+            for i, (c, a, b) in enumerate(chars)
+        ]
+        value = "".join(c for c, _, _ in chars)
+        to_remove = set()
+        for m in _SEPARATED_LETTERS.finditer(value):
+            to_remove.update(i for i in range(m.start(), m.end()) if value[i] in _SEPARATORS)
+        chars = [item for i, item in enumerate(chars) if i not in to_remove]
+        value = "".join(c for c, _, _ in chars)
+        matches = list((_REPEAT_2 if aggressive else _REPEAT_3).finditer(value))
+        for m in reversed(matches):
+            start, end = m.span()
+            original = chars[start:end]
+            if aggressive:
+                chars[start:end] = [(original[0][0], original[0][1], original[-1][2])]
             else:
-                res.append(" ")
-        return "".join(res)
+                chars[start:end] = [original[0], (original[1][0], original[1][1], original[-1][2])]
+        chars = [(c if _category(c)[0] in "LNM" else " ", a, b) for c, a, b in chars]
+        chars = [(lc, a, b) for c, a, b in chars for lc in c.lower()]
+
+        # Collapse whitespace just like ' '.join(text.split()).
+        out: list[tuple[str, int, int]] = []
+        for m in _NONSPACE.finditer("".join(c for c, _, _ in chars)):
+            if out:
+                out.append((" ", out[-1][2], chars[m.start()][1]))
+            out.extend(chars[m.start() : m.end()])
+        return NormalizedText("".join(c for c, _, _ in out), tuple((a, b) for _, a, b in out))

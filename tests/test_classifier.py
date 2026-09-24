@@ -3,7 +3,7 @@
 import pytest
 
 from lpte.core.classifier import Classifier, Severity
-from lpte.core.tokenizer import Tokenizer
+from lpte.core.tokenizer import TokenizationResult, Tokenizer
 from lpte.languages.en import EnglishProfile
 
 
@@ -23,6 +23,10 @@ def profile():
 
 
 class TestExactMatching:
+    def test_public_tokenization_result_without_offsets(self, clf, profile):
+        older_result = TokenizationResult(["fuck"], [], [], "fuck")
+        assert clf.classify(older_result, profile).is_toxic
+
     def test_detects_exact_profanity(self, clf, tok, profile):
         tokens = tok.tokenize("fuck")
         result = clf.classify(tokens, profile)

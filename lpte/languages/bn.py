@@ -2,6 +2,7 @@
 
 from lpte.core.profile import LanguageProfile
 from lpte.core.stemmer import Stemmer
+from lpte.languages.categories import categories_for
 
 
 class BengaliStemmer(Stemmer):
@@ -22,27 +23,71 @@ class BengaliStemmer(Stemmer):
     SUFFIXES = sorted(
         [
             # Possessive + case (longest first for greedy matching)
-            "টাকে", "টির", "টার", "টাত", "টিত",
+            "টাকে",
+            "টির",
+            "টার",
+            "টাত",
+            "টিত",
             # Diminutive + case
-            "গুলোকে", "গুলোর", "গুলোত", "গুলো",
-            "দেরকে", "দেরের", "দেরত", "দের",
+            "গুলোকে",
+            "গুলোর",
+            "গুলোত",
+            "গুলো",
+            "দেরকে",
+            "দেরের",
+            "দেরত",
+            "দের",
             # Plural markers
-            "রা", "গণ", "বৃন্দ",
+            "রা",
+            "গণ",
+            "বৃন্দ",
             # Verb endings
-            "ছিলাম", "ছিলে", "ছিলো", "ছিল",
-            "ছি", "ছে", "ছো", "ছোঁ",
-            "বেন", "বে", "বো", "ব",
-            "লাম", "লে", "লো", "ল",
-            "ন্তি", "ন্তে", "ন্তো", "ন্ত",
-            "য়ে", "য়ো", "য়",
+            "ছিলাম",
+            "ছিলে",
+            "ছিলো",
+            "ছিল",
+            "ছি",
+            "ছে",
+            "ছো",
+            "ছোঁ",
+            "বেন",
+            "বে",
+            "বো",
+            "ব",
+            "লাম",
+            "লে",
+            "লো",
+            "ল",
+            "ন্তি",
+            "ন্তে",
+            "ন্তো",
+            "ন্ত",
+            "য়ে",
+            "য়ো",
+            "য়",
             # Case markers
-            "কে", "রা", "র", "তে", "ত", "য়ে", "য়", "ে", "ও",
+            "কে",
+            "রা",
+            "র",
+            "তে",
+            "ত",
+            "য়ে",
+            "য়",
+            "ে",
+            "ও",
             # Diminutives
-            "টা", "টি", "টো",
+            "টা",
+            "টি",
+            "টো",
             # Adjective/adverb endings
-            "ময়", "সুল", "পূর্ণ", "শীল",
+            "ময়",
+            "সুল",
+            "পূর্ণ",
+            "শীল",
             # Honorific suffixes
-            "জি", "সাহেব", "বাবু",
+            "জি",
+            "সাহেব",
+            "বাবু",
         ],
         key=len,
         reverse=True,
@@ -65,28 +110,61 @@ class BengaliStemmer(Stemmer):
 # Root forms only — inflections are handled by the stemmer.
 _BENGALI_BAD_WORDS: set[str] = {
     # ── General profanity ──────────────────────────────────────────────────────
-    "মাদার", "ভোদ", "বোনিয়া", "পোঁদ", "গাধা", "পাগল",
-    "হারামি", "হারাম", "কুত্তা", "কুকুর", "শুয়োর", "পোড়া",
-    "বেশ্যা", "পতিতা", "রান্ডি", "খানকি", "মাগি",
-    "বদমাশ", "নষ্ট", "ছিনাল", "লুচ্চা", "লম্পট",
-    "নোংরা", "ছাগল", "গরু", "পাঁঠা",
-    "শালা", "শালি", "হারামজাদা", "জারজ",
-
+    "মাদার",
+    "ভোদ",
+    "বোনিয়া",
+    "পোঁদ",
+    "গাধা",
+    "পাগল",
+    "হারামি",
+    "হারাম",
+    "কুত্তা",
+    "কুকুর",
+    "শুয়োর",
+    "পোড়া",
+    "বেশ্যা",
+    "পতিতা",
+    "রান্ডি",
+    "খানকি",
+    "মাগি",
+    "বদমাশ",
+    "নষ্ট",
+    "ছিনাল",
+    "লুচ্চা",
+    "লম্পট",
+    "নোংরা",
+    "ছাগল",
+    "গরু",
+    "পাঁঠা",
+    "শালা",
+    "শালি",
+    "হারামজাদা",
+    "জারজ",
     # ── Sexual / vulgar ────────────────────────────────────────────────────────
-    "চুদ", "চোদ", "চুদি", "চোদন", "চুদাচুদি",
-    "বাল", "বালদের", "বালের",
-    "ধোন", "দুধ", "গুদ", "পোদ", "মুতা",
-
+    "চুদ",
+    "চোদ",
+    "চুদি",
+    "চোদন",
+    "চুদাচুদি",
+    "বাল",
+    "বালদের",
+    "বালের",
+    "ধোন",
+    "গুদ",
+    "পোদ",
+    "মুতা",
     # ── Slurs / dehumanizing ──────────────────────────────────────────────────
-    "মুর্গা", "পোকা", "জন্তু", "জানোয়ার",
-    "হিন্দু", "মুসলিম",   # only when used as slurs in context
-
-    # ── Severe compound ───────────────────────────────────────────────────────
-    "মাদারচোদ", "বোনের", "মায়ের", "বাপের",
-    "মাচোদ", "ভাগিনাচোদ", "মায়েরচোদ",
-
-    # ── Threats ───────────────────────────────────────────────────────────────
-    "মেরে", "খুন", "হত্যা",
+    "মুর্গা",
+    "পোকা",
+    "জন্তু",
+    "জানোয়ার",
+    # ── Severe compound (bare possessives/religions/milk are not insults) ────
+    "মাদারচোদ",
+    "মাচোদ",
+    "ভাগিনাচোদ",
+    "মায়েরচোদ",
+    # ── Targeted threats (not standalone news/medical vocabulary) ────────────
+    "তোকে মেরে ফেলব",
 }
 
 BengaliProfile = LanguageProfile(
@@ -94,12 +172,13 @@ BengaliProfile = LanguageProfile(
     language_name="বাংলা (Bengali)",
     bad_words=_BENGALI_BAD_WORDS,
     stemmer=BengaliStemmer(),
+    word_categories=categories_for("bn", _BENGALI_BAD_WORDS),
     context_rules={
         # "গরু" can appear in agricultural/food contexts — only flag standalone
         "পাগল": {"পাগলামি", "পাগলের মতো"},  # softer idiomatic usage
     },
     min_word_length=2,
-    version="1.1.0",
+    version="1.2.0",
     description="Bengali profanity and toxicity word list with inflectional stemmer",
     author="LPTE Contributors",
 )

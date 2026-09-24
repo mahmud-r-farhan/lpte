@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>LPTE — Local Profanity & Toxicity Engine</title>
-  <meta name="description" content="Zero-cost, on-device real-time multilingual toxicity and profanity detection engine." />
+  <meta name="description" content="Try the offline Python moderation engine via this server-hosted demo. Text is sent to the demo server." />
   <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
@@ -746,6 +746,9 @@
       { code: "fr", name: "Français (French)", flag: "🇫🇷" },
       { code: "de", name: "Deutsch (German)", flag: "🇩🇪" },
       { code: "ar", name: "العربية (Arabic)", flag: "🇸🇦" },
+      { code: "bn+en", name: "Banglish (bn+en)", flag: "🌐" },
+      { code: "hi+en", name: "Hinglish (hi+en)", flag: "🌐" },
+      { code: "auto", name: "All packs (auto)", flag: "🌐" },
     ];
 
     const SEVERITY_CONFIG = {
@@ -757,11 +760,11 @@
     };
 
     // ─── API Helpers ──────────────────────────────────────────────────────────
-    async function apiAnalyze(text, language, threshold) {
+    async function apiAnalyze(text, language, threshold, policy) {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, language, threshold }),
+        body: JSON.stringify({ text, language, threshold, policy }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -770,11 +773,11 @@
       return res.json();
     }
 
-    async function apiBatch(texts, language, threshold) {
+    async function apiBatch(texts, language, threshold, policy) {
       const res = await fetch('/api/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ texts, language, threshold }),
+        body: JSON.stringify({ texts, language, threshold, policy }),
       });
       if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || 'Batch failed'); }
       return res.json();
@@ -796,7 +799,7 @@
     }
 
     // ─── Real-time Preview Component ──────────────────────────────────────────
-    function RealtimePreview({ text, language, threshold }) {
+    function RealtimePreview({ text, language, threshold, policy }) {
       const [result, setResult] = useState(null);
       const [loading, setLoading] = useState(false);
       const debounced = useDebounce(text, 250);
@@ -804,10 +807,10 @@
       useEffect(() => {
         if (!debounced.trim() || debounced.length < 2) { setResult(null); return; }
         setLoading(true);
-        apiAnalyze(debounced, language, threshold)
+        apiAnalyze(debounced, language, threshold, policy)
           .then(r => { setResult(r); setLoading(false); })
           .catch(() => { setResult(null); setLoading(false); });
-      }, [debounced, language, threshold]);
+      }, [debounced, language, threshold, policy]);
 
       if (!text.trim()) return null;
 
@@ -816,15 +819,16 @@
           {loading ? (
             <>
               <div style={{ width:6, height:6, borderRadius:'50%', border:'1.5px solid var(--blue)', borderTopColor:'transparent', animation:'spin 0.6s linear infinite' }} />
-              <span>Scanning on-device…</span>
+              <span>Analyzing via local API…</span>
             </>
           ) : result ? (
             <>
-              <div style={{ width:7, height:7, borderRadius:'50%', background: result.is_toxic ? 'var(--red)' : 'var(--green)' }} />
-              <span style={{ fontWeight: 700, color: result.is_toxic ? 'var(--red)' : 'var(--green)' }}>
-                {result.is_toxic ? 'TOXIC' : 'CLEAN'}
+              <div style={{ width:7, height:7, borderRadius:'50%', background: ['BLOCK', 'MASK'].includes(result.decision?.action) ? 'var(--red)' : 'var(--green)' }} />
+              <span style={{ fontWeight: 700, color: ['BLOCK', 'MASK'].includes(result.decision?.action) ? 'var(--red)' : 'var(--green)' }}>
+                {result.decision?.action || (result.is_toxic ? 'TOXIC' : 'CLEAN')}
               </span>
-              <span className="mono" style={{ color: 'var(--text-muted)' }}>{(result.confidence * 100).toFixed(0)}% confidence</span>
+              <span className="mono" style={{ color: 'var(--text-muted)' }}>{(result.confidence * 100).toFixed(0)}% rule score</span>
+              {result.categories?.map(c => <span key={c} className="signal-tag">{c}</span>)}
               {result.matched_terms?.length > 0 && (
                 <span className="matched-chip">{result.matched_terms[0]}</span>
               )}
@@ -835,7 +839,7 @@
     }
 
     // ─── Chat View ────────────────────────────────────────────────────────────
-    function ChatTab({ language, setLanguage, threshold }) {
+    function ChatTab({ language, setLanguage, threshold, policy }) {
       const [messages, setMessages] = useState([]);
       const [input, setInput] = useState('');
       const [loading, setLoading] = useState(false);
@@ -855,12 +859,11 @@
         setMessages(prev => [...prev, { id: Date.now(), text: trimmed, isUser: true, timestamp: getNow() }]);
         setLoading(true);
         try {
-          const result = await apiAnalyze(trimmed, lang, threshold);
+          const result = await apiAnalyze(trimmed, lang, threshold, policy);
           setMessages(prev => [...prev, { id: Date.now()+1, text: trimmed, result, isUser: false, timestamp: getNow() }]);
         } catch (err) {
           setMessages(prev => [...prev, {
-            id: Date.now()+1, text: trimmed,
-            result: { is_toxic: false, severity: 'NONE', confidence: 0, matched_terms: [], signals: {}, sanitized: trimmed },
+            id: Date.now()+1, text: trimmed, error: err.message,
             isUser: false, timestamp: getNow(),
           }]);
         } finally {
@@ -873,7 +876,8 @@
         const data = messages.filter(m => !m.isUser).map(m => ({
           text: m.text, is_toxic: m.result?.is_toxic, severity: m.result?.severity,
           confidence: m.result?.confidence, matched_terms: m.result?.matched_terms,
-          sanitized: m.result?.sanitized, timestamp: m.timestamp,
+          categories: m.result?.categories, decision: m.result?.decision,
+          error: m.error, sanitized: m.result?.sanitized, timestamp: m.timestamp,
         }));
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -902,11 +906,11 @@
             {messages.length === 0 ? (
               <div className="empty-hero">
                 <div className="hero-glow-badge">
-                  <span>⚡ 100% On-Device &middot; Sub-25ms Latency &middot; 11 Languages</span>
+                  <span>⚡ Offline Python core &middot; Rule-based moderation &middot; 11 built-in languages</span>
                 </div>
                 <h1 className="hero-title">Real-Time Toxicity & Profanity Engine</h1>
                 <p className="hero-desc">
-                  Zero cloud dependency. Detects root profanity, leetspeak obfuscation, homoglyphs, and word-splitting across 11 world languages.
+                  Offline Python engine with no external moderation calls. This hosted demo sends text to this server; do not paste private data.
                 </p>
 
                 {/* Language Quick Switcher */}
@@ -945,8 +949,13 @@
                       </div>
                     );
                   }
+                  if (msg.error) return (
+                    <div key={msg.id} className="msg-row-engine">
+                      <div className="bubble-engine toxic" role="alert">Analysis failed: {msg.error}</div>
+                    </div>
+                  );
                   const r = msg.result;
-                  const isToxic = r?.is_toxic;
+                  const isToxic = r?.is_toxic || ['BLOCK', 'MASK'].includes(r?.decision?.action);
                   const sevCfg = SEVERITY_CONFIG[r?.severity] || SEVERITY_CONFIG.NONE;
 
                   return (
@@ -966,7 +975,7 @@
                         </div>
 
                         {/* Sanitized message */}
-                        {isToxic && r?.sanitized && r.sanitized !== msg.text && (
+                        {r?.sanitized && r.sanitized !== msg.text && (
                           <div style={{ padding:'8px 12px', background:'rgba(255,255,255,0.04)', borderRadius:8, margin:'8px 0', border:'1px solid var(--border)' }}>
                             <div style={{ fontSize:10, textTransform:'uppercase', color:'var(--text-muted)', fontWeight:700 }}>Sanitized Output</div>
                             <p className="mono" style={{ fontSize:13, color:'var(--green)', marginTop:2 }}>{r.sanitized}</p>
@@ -980,7 +989,9 @@
 
                         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, flexWrap:'wrap' }}>
                           <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
-                            <span className="mono" style={{ fontSize:11, color:'var(--text-muted)' }}>{((r?.confidence || 0) * 100).toFixed(1)}% match</span>
+                            <span className="mono" style={{ fontSize:11, color:'var(--text-muted)' }}>{((r?.confidence || 0) * 100).toFixed(1)}% rule score</span>
+                            {r?.decision && <span className="signal-tag">{r.decision.action}</span>}
+                            {r?.categories?.map(c => <span key={c} className="signal-tag">{c}</span>)}
                             {r?.matched_terms?.map((t, idx) => (
                               <span key={idx} className="matched-chip">{t}</span>
                             ))}
@@ -1043,14 +1054,14 @@
                 </svg>
               </button>
             </div>
-            <RealtimePreview text={input} language={language} threshold={threshold} />
+            <RealtimePreview text={input} language={language} threshold={threshold} policy={policy} />
           </div>
         </div>
       );
     }
 
     // ─── Batch View ───────────────────────────────────────────────────────────
-    function BatchTab({ language, threshold }) {
+    function BatchTab({ language, threshold, policy }) {
       const [input, setInput] = useState('');
       const [results, setResults] = useState(null);
       const [loading, setLoading] = useState(false);
@@ -1060,9 +1071,9 @@
       const runBatch = async () => {
         const lines = input.split('\n').map(l => l.trim()).filter(Boolean);
         if (!lines.length) return;
-        setLoading(true); setError(null);
+        setLoading(true); setError(null); setResults(null); setSummary(null);
         try {
-          const data = await apiBatch(lines, language, threshold);
+          const data = await apiBatch(lines, language, threshold, policy);
           setResults(data.results);
           setSummary({ total: data.total, toxic: data.toxic_count, latency: data.latency_ms });
         } catch (e) { setError(e.message); }
@@ -1071,7 +1082,7 @@
 
       const exportCSV = () => {
         if (!results) return;
-        const rows = [["Index", "Sanitized Text", "Is Toxic", "Severity", "Confidence", "Matched Terms"]];
+        const rows = [["Index", "Sanitized Text", "Is Toxic", "Severity", "Rule Score", "Categories", "Action", "Matched Terms"]];
         results.forEach((r, i) => {
           rows.push([
             i + 1,
@@ -1079,6 +1090,8 @@
             r.is_toxic ? 'TRUE' : 'FALSE',
             r.severity,
             r.confidence,
+            `"${(r.categories || []).join('; ')}"`,
+            r.decision?.action || '',
             `"${(r.matched_terms || []).join('; ')}"`,
           ]);
         });
@@ -1135,16 +1148,17 @@
             {results && (
               <div style={{ display:'flex', flexDirection:'column', gap:8, marginTop:8 }}>
                 {results.map((r, i) => (
-                  <div key={i} className={`batch-row ${r.is_toxic ? 'toxic' : 'clean'}`}>
+                  <div key={i} className={`batch-row ${['BLOCK', 'MASK'].includes(r.decision?.action) || r.is_toxic ? 'toxic' : 'clean'}`}>
                     <span className="mono" style={{ fontSize:11, color:'var(--text-muted)', width:24 }}>#{i+1}</span>
                     <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.sanitized}</span>
                     <span className="badge-severity" style={{
-                      color: r.is_toxic ? 'var(--red)' : 'var(--green)',
-                      background: r.is_toxic ? 'rgba(244,63,94,0.1)' : 'rgba(16,185,129,0.1)',
-                      borderColor: r.is_toxic ? 'rgba(244,63,94,0.3)' : 'rgba(16,185,129,0.3)',
+                      color: r.severity !== 'NONE' ? 'var(--red)' : 'var(--green)',
+                      background: r.severity !== 'NONE' ? 'rgba(244,63,94,0.1)' : 'rgba(16,185,129,0.1)',
+                      borderColor: r.severity !== 'NONE' ? 'rgba(244,63,94,0.3)' : 'rgba(16,185,129,0.3)',
                     }}>
                       {r.severity}
                     </span>
+                    {r.decision && <span className="signal-tag">{r.decision.action}</span>}
                     <span className="mono" style={{ fontSize:11, color:'var(--text-muted)' }}>{(r.confidence*100).toFixed(0)}%</span>
                   </div>
                 ))}
@@ -1179,7 +1193,7 @@
             <div className="stats-header-row">
               <div>
                 <h2 style={{ fontSize:18, fontWeight:800, letterSpacing:'-0.02em' }}>Engine Architecture & Metrics</h2>
-                <p style={{ fontSize:13, color:'var(--text-muted)' }}>Real-time statistics across all 11 active on-device engines</p>
+                <p style={{ fontSize:13, color:'var(--text-muted)' }}>Real-time statistics for the language engines on this server</p>
               </div>
               <button className="btn-action" onClick={load}>Refresh</button>
             </div>
@@ -1196,7 +1210,7 @@
               </div>
               <div className="metric-card">
                 <span className="metric-title">Active World Languages</span>
-                <span className="metric-val" style={{ color: 'var(--green)' }}>11</span>
+                <span className="metric-val" style={{ color: 'var(--green)' }}>{Object.keys(engines).length}</span>
               </div>
             </div>
 
@@ -1252,6 +1266,18 @@
       const [activeTab, setActiveTab] = useState('chat');
       const [language, setLanguage] = useState('en');
       const [threshold, setThreshold] = useState(0.6);
+      const [policy, setPolicy] = useState('balanced');
+      const [languages, setLanguages] = useState(LANGUAGES);
+
+      useEffect(() => {
+        fetch('/api/languages').then(r => r.json()).then(data => {
+          const modes = LANGUAGES.filter(l => l.code.includes('+') || l.code === 'auto');
+          setLanguages([
+            ...data.languages.map(p => ({ ...p, flag: LANGUAGES.find(l => l.code === p.code)?.flag || '🌐' })),
+            ...modes,
+          ]);
+        }).catch(() => {});
+      }, []);
 
       return (
         <>
@@ -1266,7 +1292,7 @@
                 </div>
                 <div>
                   <div className="brand-title">LPTE Engine</div>
-                  <div className="brand-subtitle">Local Profanity & Toxicity Engine v1.1.0</div>
+                  <div className="brand-subtitle">Local Profanity & Toxicity Engine v1.2.0</div>
                 </div>
               </div>
 
@@ -1296,9 +1322,16 @@
               <div className="controls-group">
                 <div className="select-pill">
                   <select value={language} onChange={e => setLanguage(e.target.value)}>
-                    {LANGUAGES.map(l => (
+                    {languages.map(l => (
                       <option key={l.code} value={l.code}>{l.flag} {l.name}</option>
                     ))}
+                  </select>
+                </div>
+                <div className="select-pill">
+                  <select value={policy} onChange={e => setPolicy(e.target.value)} aria-label="Moderation policy">
+                    <option value="strict">Strict policy</option>
+                    <option value="balanced">Balanced policy</option>
+                    <option value="lenient">Lenient policy</option>
                   </select>
                 </div>
 
@@ -1318,8 +1351,8 @@
           </header>
 
           <main className="app-main">
-            {activeTab === 'chat'  && <ChatTab  language={language} setLanguage={setLanguage} threshold={threshold} />}
-            {activeTab === 'batch' && <BatchTab language={language} threshold={threshold} />}
+            {activeTab === 'chat'  && <ChatTab language={language} setLanguage={setLanguage} threshold={threshold} policy={policy} />}
+            {activeTab === 'batch' && <BatchTab language={language} threshold={threshold} policy={policy} />}
             {activeTab === 'stats' && <StatsTab />}
           </main>
         </>

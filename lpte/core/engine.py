@@ -1,245 +1,186 @@
-"""
-LpteEngine — high-level API for toxicity analysis.
-
-This is the primary entry point for consuming the library.
-
-Usage:
-    from lpte import LpteEngine
-    from lpte.languages import EnglishProfile
-
-    engine = LpteEngine(EnglishProfile)
-    result = engine.analyze("some text")
-    if result.is_toxic:
-        print(f"Toxic: {result.severity} ({result.confidence})")
-
-Advanced:
-    # With caching (default: enabled, 512 entries)
-    engine = LpteEngine(EnglishProfile, cache_size=512)
-
-    # Batch analysis
-    results = engine.batch_analyze(["text one", "text two"])
-
-    # HTML input
-    clean_result = engine.analyze_html("<b>hello</b> f*ck")
-"""
+"""High-level offline analysis, masking, batch and async APIs."""
 
 from __future__ import annotations
 
-import re
+import asyncio
+import threading
 import time
+from html.parser import HTMLParser
 
 from lpte.core.cache import LRUCache
-from lpte.core.classifier import ClassificationResult, Classifier, Severity
+from lpte.core.classifier import (
+    SIGNAL_NAMES,
+    ClassificationResult,
+    Classifier,
+    severity_for,
+    validate_threshold,
+)
 from lpte.core.normalizer import TextNormalizer
 from lpte.core.profile import LanguageProfile
 from lpte.core.tokenizer import Tokenizer
 
-# Regex to strip HTML tags for analyze_html()
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
-_HTML_ENTITY_RE = re.compile(r"&(?:#\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);")
-_HTML_ENTITIES: dict[str, str] = {
-    "&amp;": "&", "&lt;": "<", "&gt;": ">",
-    "&quot;": '"', "&apos;": "'", "&nbsp;": " ",
-}
+
+class _TextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.parts.append(" ")
+
+    def handle_endtag(self, tag: str) -> None:
+        self.parts.append(" ")
 
 
 def _strip_html(html: str) -> str:
-    """Strip HTML tags and decode common entities."""
-    # Decode named entities first
-    for entity, char in _HTML_ENTITIES.items():
-        html = html.replace(entity, char)
-    # Decode remaining entities
-    html = _HTML_ENTITY_RE.sub(" ", html)
-    # Strip tags
-    return _HTML_TAG_RE.sub(" ", html)
+    """Extract visible text, decoding entities exactly once (not an HTML sanitizer)."""
+    parser = _TextParser()
+    parser.feed(html)
+    parser.close()
+    return "".join(parser.parts)
+
+
+def _check_mask(mask: str) -> None:
+    if not isinstance(mask, str) or len(mask) != 1 or mask.isspace():
+        raise ValueError("mask must be a single non-whitespace character")
 
 
 class LpteEngine:
-    """High-level toxicity analysis engine with caching and batch support."""
+    """Compile a language profile once; reuse the engine across requests.
+
+    All caches are bounded and per-engine. Profile data must not be mutated
+    after constructing an engine; reload the profile to pick up new rules.
+    """
 
     def __init__(
         self,
         profile: LanguageProfile,
         default_threshold: float = 0.6,
         cache_size: int = 512,
-    ):
-        """
-        Args:
-            profile: Language profile (bad words, stemmer, context rules).
-            default_threshold: Default confidence threshold for toxic classification.
-                               Can be overridden per-call.
-            cache_size: LRU cache capacity for analysis results.
-                        Set to 0 to disable caching.
-        """
+    ) -> None:
+        validate_threshold(default_threshold)
+        if type(cache_size) is not int or cache_size < 0:
+            raise ValueError("cache_size must be a non-negative integer")
         self.profile = profile
         self.default_threshold = default_threshold
         self.normalizer = TextNormalizer()
-        self.tokenizer = Tokenizer()
-        self.classifier = Classifier()
-
-        # Optional LRU cache
-        self._cache: LRUCache[tuple, ClassificationResult] | None = (
-            LRUCache(capacity=cache_size) if cache_size > 0 else None
+        self.classifier = Classifier(profile)
+        self.tokenizer = Tokenizer(self.classifier.cjk_lengths)
+        # Store threshold-free evidence. A result is always copied before it
+        # leaves the engine, so users cannot corrupt later cached requests.
+        self._cache: LRUCache[str, ClassificationResult] | None = (
+            LRUCache(cache_size) if cache_size else None
         )
-
-        # Engine-level statistics
-        self._total_analyzed: int = 0
-        self._total_toxic: int = 0
-        self._total_time_ms: float = 0.0
-
-    # ─── Public API ───────────────────────────────────────────────────────────
+        self._stats_lock = threading.Lock()
+        self._total_analyzed = 0
+        self._total_toxic = 0
+        self._total_time_ms = 0.0
 
     def analyze(self, text: str, threshold: float | None = None) -> ClassificationResult:
-        """
-        Analyze text for toxic content.
-        Tries multiple normalization variants to catch obfuscation.
-
-        Args:
-            text: Raw input text to analyze.
-            threshold: Confidence threshold [0.0, 1.0]. Defaults to engine default.
-
-        Returns:
-            ClassificationResult with is_toxic, severity, confidence, matched_terms, signals.
-        """
-        if threshold is None:
-            threshold = self.default_threshold
-
-        # Cache lookup
-        cache_key = (text, self.profile.language_code, threshold)
-        if self._cache is not None:
-            cached = self._cache.get(cache_key)
-            if cached is not None:
-                return cached
-
-        t0 = time.perf_counter()
-
-        result = self._analyze_uncached(text, threshold)
-
-        elapsed_ms = (time.perf_counter() - t0) * 1000
-        self._total_analyzed += 1
-        self._total_time_ms += elapsed_ms
-        if result.is_toxic:
-            self._total_toxic += 1
-
-        if self._cache is not None:
-            self._cache.put(cache_key, result)
-
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        threshold = self.default_threshold if threshold is None else threshold
+        validate_threshold(threshold)
+        start = time.perf_counter()
+        evidence = self._cache.get(text) if self._cache is not None else None
+        if evidence is None:
+            evidence = self._analyze_uncached(text)
+            if self._cache is not None:
+                self._cache.put(text, evidence)
+        result = evidence.at_threshold(threshold)
+        with self._stats_lock:
+            self._total_analyzed += 1
+            self._total_toxic += int(result.is_toxic)
+            self._total_time_ms += (time.perf_counter() - start) * 1000
         return result
 
     def is_toxic(self, text: str, threshold: float | None = None) -> bool:
-        """Quick check: is the text toxic?"""
         return self.analyze(text, threshold).is_toxic
 
     def sanitize(self, text: str, mask: str = "*", threshold: float | None = None) -> str:
-        """
-        Sanitize text by replacing toxic segments with a mask character.
-
-        Args:
-            text: Raw input text.
-            mask: Character to use for masking (default: '*').
-            threshold: Confidence threshold override.
-
-        Returns:
-            Text with toxic words replaced by mask * len(word).
-        """
+        """Mask original, not normalized, surfaces for every detected term."""
+        _check_mask(mask)
         result = self.analyze(text, threshold)
         if not result.is_toxic:
             return text
-
-        sanitized = text
-        for term in result.matched_terms:
-            # Match whole words, case-insensitive, including common leet variations
-            pattern = re.compile(r"\b" + re.escape(term) + r"\b", re.IGNORECASE)
-            sanitized = pattern.sub(lambda m: mask * len(m.group()), sanitized)
-
-        return sanitized
+        variants = self.normalizer.normalize_variants_with_spans(text)
+        covered = [False] * len(text)
+        for match in result.matches:
+            variant = variants[match.variant]
+            start, end = variant.original_span(match.start, match.end)
+            covered[start:end] = [True] * (end - start)
+        return "".join(mask if covered[i] else c for i, c in enumerate(text))
 
     def batch_analyze(
         self,
         texts: list[str],
         threshold: float | None = None,
     ) -> list[ClassificationResult]:
-        """
-        Analyze multiple texts in one call.
+        return [self.analyze(t, threshold) for t in texts]
 
-        Args:
-            texts: List of raw input strings.
-            threshold: Confidence threshold override (applied to all texts).
+    async def analyze_async(
+        self, text: str, threshold: float | None = None
+    ) -> ClassificationResult:
+        """Execute CPU work in a thread instead of blocking an asyncio loop."""
+        return await asyncio.to_thread(self.analyze, text, threshold)
 
-        Returns:
-            List of ClassificationResult, one per input text, in order.
-        """
-        return [self.analyze(text, threshold) for text in texts]
+    async def batch_analyze_async(
+        self,
+        texts: list[str],
+        threshold: float | None = None,
+    ) -> list[ClassificationResult]:
+        return await asyncio.to_thread(self.batch_analyze, texts, threshold)
 
     def analyze_html(self, html: str, threshold: float | None = None) -> ClassificationResult:
-        """
-        Analyze HTML content for toxic text — strips tags before analysis.
-
-        Args:
-            html: Raw HTML string.
-            threshold: Confidence threshold override.
-
-        Returns:
-            ClassificationResult based on the plain-text content.
-        """
-        plain_text = _strip_html(html)
-        return self.analyze(plain_text, threshold)
+        return self.analyze(_strip_html(html), threshold)
 
     def cache_stats(self) -> dict[str, object] | None:
-        """
-        Return cache statistics, or None if caching is disabled.
-        """
-        if self._cache is None:
-            return None
-        return self._cache.stats()
+        return self._cache.stats() if self._cache is not None else None
 
     def engine_stats(self) -> dict[str, object]:
-        """
-        Return engine-level statistics.
-        """
-        avg_ms = (
-            self._total_time_ms / self._total_analyzed
-            if self._total_analyzed > 0 else 0.0
-        )
+        with self._stats_lock:
+            count, toxic, elapsed = self._total_analyzed, self._total_toxic, self._total_time_ms
         return {
-            "total_analyzed": self._total_analyzed,
-            "total_toxic": self._total_toxic,
-            "detection_rate": (
-                self._total_toxic / self._total_analyzed
-                if self._total_analyzed > 0 else 0.0
-            ),
-            "avg_latency_ms": round(avg_ms, 3),
+            "total_analyzed": count,
+            "total_toxic": toxic,
+            "detection_rate": toxic / count if count else 0.0,
+            "avg_latency_ms": round(elapsed / count, 3) if count else 0.0,
             "language_code": self.profile.language_code,
             "language_name": self.profile.language_name,
             "vocabulary_size": len(self.profile.bad_words),
-            "cache": self._cache.stats() if self._cache else None,
+            "cache": self.cache_stats(),
         }
 
     def clear_cache(self) -> None:
-        """Evict all cached results."""
         if self._cache is not None:
             self._cache.clear()
 
-    # ─── Internal ─────────────────────────────────────────────────────────────
-
-    def _analyze_uncached(self, text: str, threshold: float) -> ClassificationResult:
-        """Core analysis logic — no caching layer."""
-        # Try primary normalization first
-        normalized = self.normalizer.normalize(text)
-        tokens = self.tokenizer.tokenize(normalized)
-        result = self.classifier.classify(tokens, self.profile, threshold)
-        if result.is_toxic:
-            return result
-
-        # Try alternative normalizations (leet alternatives, aggressive collapse)
+    def _analyze_uncached(self, text: str) -> ClassificationResult:
         variants = self.normalizer.normalize_with_alternatives(text)
-        for variant in variants[1:]:  # skip primary (already tried)
-            tokens = self.tokenizer.tokenize(variant)
-            variant_result = self.classifier.classify(tokens, self.profile, threshold)
-            if variant_result.is_toxic:
-                return variant_result
-            # Keep the best result if nothing is toxic
-            if variant_result.confidence > result.confidence:
-                result = variant_result
-
-        return result
+        results = [
+            self.classifier.classify(self.tokenizer.tokenize(v), self.profile) for v in variants
+        ]
+        confidence = max(r.confidence for r in results)
+        matches = tuple(
+            # Copy offsets with their normalization-variant id so sanitize()
+            # can recover exactly the span that produced this match.
+            type(m)(m.term, m.category, m.signal, m.start, m.end, i, m.language)
+            for i, r in enumerate(results)
+            for m in r.matches
+        )
+        terms = list(dict.fromkeys(m.term for m in matches))
+        categories = list(dict.fromkeys(m.category for m in matches))
+        signals = {name: max(r.signals[name] for r in results) for name in SIGNAL_NAMES}
+        return ClassificationResult(
+            bool(confidence and confidence >= self.default_threshold),
+            severity_for(confidence, set(categories)),
+            confidence,
+            terms,
+            signals,
+            categories,
+            self.profile.language_code if matches else "",
+            matches,
+        )

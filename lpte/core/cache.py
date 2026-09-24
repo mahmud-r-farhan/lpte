@@ -1,7 +1,7 @@
 """
 Thread-safe LRU cache for ClassificationResult objects.
 
-Avoids re-analyzing identical text+language+threshold combinations.
+Avoids re-analyzing identical text (the engine derives thresholds from cached evidence).
 Pure Python — no external dependencies.
 """
 
@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import threading
 from collections import OrderedDict
-from typing import Generic, Hashable, Optional, TypeVar
+from collections.abc import Hashable
+from typing import Generic, TypeVar
 
 _KT = TypeVar("_KT", bound=Hashable)
 _VT = TypeVar("_VT")
@@ -37,7 +38,7 @@ class LRUCache(Generic[_KT, _VT]):
     # Public API
     # ------------------------------------------------------------------
 
-    def get(self, key: _KT) -> Optional[_VT]:
+    def get(self, key: _KT) -> _VT | None:
         """Return cached value or None if not present. Marks key as recently used."""
         with self._lock:
             if key not in self._store:
@@ -115,7 +116,4 @@ class LRUCache(Generic[_KT, _VT]):
             }
 
     def __repr__(self) -> str:
-        return (
-            f"LRUCache(size={self.size}/{self._capacity}, "
-            f"hit_rate={self.hit_rate:.1%})"
-        )
+        return f"LRUCache(size={self.size}/{self._capacity}, hit_rate={self.hit_rate:.1%})"

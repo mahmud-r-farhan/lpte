@@ -22,7 +22,9 @@ class TestLeetSpeakReversal:
     def test_replaces_leet_symbols(self, norm):
         assert norm.normalize("@") == "a"
         assert norm.normalize("$") == "s"
-        assert norm.normalize("!") == "i"
+        assert norm.normalize("!") == ""  # sentence punctuation is not leetspeak
+        assert norm.normalize("sh!t") == "shit"
+        assert norm.normalize("ass!") == "ass"
 
     def test_complex_leet_strings(self, norm):
         # 4 → u, @ → a (primary mappings)

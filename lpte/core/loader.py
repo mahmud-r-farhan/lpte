@@ -1,222 +1,215 @@
-"""
-JSON-based language pack loader.
+"""Validated, zero-dependency JSON language-pack loading.
 
-Allows adding new languages by dropping a single JSON file — no code changes needed.
-
-JSON format:
-{
-    "language_code": "bn",
-    "language_name": "বাংলা",
-    "bad_words": ["word1", "word2"],
-    "context_rules": {"word1": ["negator1"]},
-    "min_word_length": 2,
-    "suffix_rules": ["টা", "টি", "রা"],
-    "version": "1.0.0",
-    "description": "Optional description",
-    "author": "Optional author"
-}
+A JSON pack can define vocabulary, benign compounds, categories, suffix rules
+and optional Unicode script routing without adding Python code. All errors
+include the source/field so a bad pack fails validation before deployment.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
-from lpte.core.profile import LanguageProfile
+from lpte.core.normalizer import TextNormalizer
+from lpte.core.profile import CATEGORIES, LanguageProfile
 from lpte.core.stemmer import Stemmer
 
+_REQUIRED = ("language_code", "language_name", "bad_words")
+_ALLOWED = frozenset(
+    {
+        *_REQUIRED,
+        "context_rules",
+        "word_categories",
+        "aliases",
+        "min_word_length",
+        "suffix_rules",
+        "scripts",
+        "version",
+        "description",
+        "author",
+    }
+)
+_SCRIPTS = frozenset(
+    {
+        "Latin",
+        "Cyrillic",
+        "Bengali",
+        "Devanagari",
+        "Arabic",
+        "Han",
+        "Kana",
+        "Hangul",
+        "Greek",
+        "Other",
+    }
+)
+_CODE_RE = re.compile(r"^[a-z]{2,8}(?:-[a-z]{2,8})?$")
 
-# ─── Validation ───────────────────────────────────────────────────────────────
 
-_REQUIRED_FIELDS = ("language_code", "language_name", "bad_words")
+def _strings(value: Any, name: str, source: str, *, nonempty: bool = False) -> list[str]:
+    if not isinstance(value, list) or (nonempty and not value):
+        raise ValueError(
+            f"{source}: '{name}' must be a {'non-empty ' if nonempty else ''}list of strings"
+        )
+    if any(not isinstance(s, str) or not s.strip() or s != s.strip() for s in value):
+        raise ValueError(f"{source}: '{name}' entries must be non-empty, trimmed strings")
+    if len(value) != len(set(value)):
+        raise ValueError(f"{source}: '{name}' contains duplicate entries")
+    return value
 
 
-def _validate_pack(data: dict[str, Any], source: str = "<unknown>") -> None:
-    """Validate a language pack dict. Raises ValueError with helpful messages."""
-    missing = [f for f in _REQUIRED_FIELDS if f not in data]
+def _validate_pack(data: Any, source: str) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        raise ValueError(f"{source}: language pack must be a JSON object")
+    if any(not isinstance(key, str) for key in data):
+        raise ValueError(f"{source}: language pack keys must be strings")
+    missing = set(_REQUIRED) - data.keys()
     if missing:
+        raise ValueError(f"{source}: missing required fields: {', '.join(sorted(missing))}")
+    unknown = data.keys() - _ALLOWED
+    if unknown:
+        raise ValueError(f"{source}: unknown field(s): {', '.join(sorted(unknown))}")
+    code = data["language_code"]
+    if not isinstance(code, str) or not _CODE_RE.fullmatch(code):
         raise ValueError(
-            f"Language pack '{source}' is missing required fields: {missing}. "
-            f"Required: {list(_REQUIRED_FIELDS)}"
+            f"{source}: 'language_code' must be a lowercase language code (e.g. 'ur' or 'bn-latn')"
         )
+    for key in ("language_name", "version", "description", "author"):
+        if key in data and (
+            not isinstance(data[key], str) or (key == "language_name" and not data[key].strip())
+        ):
+            raise ValueError(f"{source}: '{key}' must be a string")
+    words = _strings(data["bad_words"], "bad_words", source, nonempty=True)
+    normalizer = TextNormalizer()
 
-    if not isinstance(data["bad_words"], list):
-        raise ValueError(
-            f"Language pack '{source}': 'bad_words' must be a list of strings, "
-            f"got {type(data['bad_words']).__name__}"
-        )
-
-    if len(data["bad_words"]) == 0:
-        raise ValueError(
-            f"Language pack '{source}': 'bad_words' must contain at least one entry"
-        )
-
-    if not isinstance(data["language_code"], str) or not data["language_code"].strip():
-        raise ValueError(
-            f"Language pack '{source}': 'language_code' must be a non-empty string"
-        )
-
-    if "context_rules" in data and not isinstance(data["context_rules"], dict):
-        raise ValueError(
-            f"Language pack '{source}': 'context_rules' must be a dict, "
-            f"got {type(data['context_rules']).__name__}"
-        )
-
-    if "min_word_length" in data:
-        mwl = data["min_word_length"]
-        if not isinstance(mwl, int) or mwl < 1:
+    def canonical(term: str, field_name: str) -> None:
+        normalized = normalizer.normalize(term)
+        if normalized != term:
             raise ValueError(
-                f"Language pack '{source}': 'min_word_length' must be a positive int, got {mwl!r}"
+                f"{source}: '{field_name}' term {term!r} is not normalized; use {normalized!r}"
             )
 
+    for term in words:
+        canonical(term, "bad_words")
+    word_set = set(words)
+    min_len = data.get("min_word_length", 2)
+    if type(min_len) is not int or min_len < 1:
+        raise ValueError(f"{source}: 'min_word_length' must be a positive integer")
+    _strings(data.get("suffix_rules", []), "suffix_rules", source)
+    scripts = _strings(data.get("scripts", []), "scripts", source)
+    if set(scripts) - _SCRIPTS:
+        raise ValueError(f"{source}: unknown scripts: {', '.join(sorted(set(scripts) - _SCRIPTS))}")
 
-# ─── SuffixStripper ───────────────────────────────────────────────────────────
+    aliases = data.get("aliases", {})
+    if not isinstance(aliases, dict):
+        raise ValueError(f"{source}: 'aliases' must be an object mapping variants to bad words")
+    for variant, target in aliases.items():
+        if not isinstance(variant, str) or not variant.strip() or variant != variant.strip():
+            raise ValueError(f"{source}: alias keys must be non-empty, trimmed strings")
+        if not isinstance(target, str) or target not in word_set:
+            raise ValueError(f"{source}: alias '{variant}' must refer to a term in bad_words")
+        canonical(variant, "aliases")
+        if variant in word_set:
+            raise ValueError(f"{source}: alias '{variant}' is already in bad_words")
+    for key in ("context_rules", "word_categories"):
+        mapping = data.get(key, {})
+        if not isinstance(mapping, dict):
+            raise ValueError(f"{source}: '{key}' must be an object keyed by bad word")
+        invalid = sorted(set(mapping) - word_set)
+        if invalid:
+            raise ValueError(f"{source}: '{key}' contains terms not in bad_words: {invalid}")
+        for term, value in mapping.items():
+            if key == "context_rules":
+                for phrase in _strings(value, f"context_rules.{term}", source):
+                    canonical(phrase, f"context_rules.{term}")
+            elif not isinstance(value, str) or value not in CATEGORIES:
+                allowed = ", ".join(sorted(CATEGORIES))
+                raise ValueError(f"{source}: 'word_categories.{term}' must be one of {allowed}")
+    return data
+
 
 class SuffixStripper(Stemmer):
-    """Generic stemmer that strips a list of known suffixes."""
+    """Generic indexed, longest-suffix-first stemmer for data-only packs."""
 
     def __init__(self, suffixes: list[str], min_stem_length: int = 2):
-        # Sort by length descending for greedy matching
         self.suffixes = sorted(suffixes, key=len, reverse=True)
         self.min_stem_length = min_stem_length
+        buckets: dict[str, list[str]] = {}
+        for suffix in self.suffixes:
+            buckets.setdefault(suffix[-1], []).append(suffix)
+        self._buckets = buckets
 
     def stem(self, word: str) -> str:
-        if len(word) < self.min_stem_length + 2:
+        if len(word) < self.min_stem_length + 1:
             return word
-
-        for suffix in self.suffixes:
+        for suffix in self._buckets.get(word[-1], ()):
             if word.endswith(suffix) and len(word) - len(suffix) >= self.min_stem_length:
                 return word[: -len(suffix)]
-
         return word
 
 
 class _IdentityStemmer(Stemmer):
-    """No-op stemmer — returns words unchanged."""
-
     def stem(self, word: str) -> str:
         return word
 
 
-# ─── Loader ───────────────────────────────────────────────────────────────────
-
 class LanguagePackLoader:
-    """Load language profiles from JSON data files."""
+    """Load one JSON pack or an entire directory of ``*_profile.json`` files."""
 
     @staticmethod
     def load_file(path: str | Path, stemmer: Stemmer | None = None) -> LanguageProfile:
-        """
-        Load a language pack from a JSON file.
-
-        Args:
-            path: Path to JSON language pack file.
-            stemmer: Custom stemmer. If None, uses suffix-based stripping
-                     from the "suffix_rules" field in the JSON.
-
-        Returns:
-            Configured LanguageProfile.
-
-        Raises:
-            FileNotFoundError: If path does not exist.
-            ValueError: If JSON is missing required fields or has invalid values.
-        """
         path = Path(path)
-        if not path.exists():
-            raise FileNotFoundError(f"Language pack file not found: {path}")
-
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        return LanguagePackLoader._from_dict(data, stemmer, source=str(path))
+        with path.open(encoding="utf-8") as f:
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path}: invalid JSON: {exc}") from exc
+        return LanguagePackLoader._from_dict(data, stemmer, str(path))
 
     @staticmethod
     def load_json(json_str: str, stemmer: Stemmer | None = None) -> LanguageProfile:
-        """
-        Load a language pack from a JSON string.
-
-        Args:
-            json_str: JSON string containing language pack data.
-            stemmer: Custom stemmer. If None, uses suffix-based stripping.
-
-        Returns:
-            Configured LanguageProfile.
-
-        Raises:
-            ValueError: If JSON is invalid or missing required fields.
-        """
         try:
             data = json.loads(json_str)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON string: {e}") from e
-
-        return LanguagePackLoader._from_dict(data, stemmer, source="<json_string>")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"<json>: invalid JSON: {exc}") from exc
+        return LanguagePackLoader._from_dict(data, stemmer, "<json>")
 
     @staticmethod
     def load_dict(data: dict[str, Any], stemmer: Stemmer | None = None) -> LanguageProfile:
-        """
-        Load a language pack from an already-parsed dict.
-
-        Args:
-            data: Dict matching the language pack schema.
-            stemmer: Custom stemmer override.
-
-        Returns:
-            Configured LanguageProfile.
-        """
-        return LanguagePackLoader._from_dict(data, stemmer, source="<dict>")
+        return LanguagePackLoader._from_dict(data, stemmer, "<dict>")
 
     @staticmethod
     def load_directory(directory: str | Path) -> dict[str, LanguageProfile]:
-        """
-        Load all ``*_profile.json`` files from a directory.
-
-        Args:
-            directory: Directory path to scan.
-
-        Returns:
-            Dict mapping ``language_code`` → ``LanguageProfile``.
-
-        Raises:
-            NotADirectoryError: If path is not a directory.
-        """
         directory = Path(directory)
         if not directory.is_dir():
             raise NotADirectoryError(f"Not a directory: {directory}")
-
         profiles: dict[str, LanguageProfile] = {}
-        for json_file in sorted(directory.glob("*_profile.json")):
-            profile = LanguagePackLoader.load_file(json_file)
+        for file in sorted(directory.glob("*_profile.json")):
+            profile = LanguagePackLoader.load_file(file)
+            if file.stem != f"{profile.language_code}_profile":
+                raise ValueError(f"{file}: filename must be {profile.language_code}_profile.json")
+            if profile.language_code in profiles:
+                raise ValueError(f"{file}: duplicate language code '{profile.language_code}'")
             profiles[profile.language_code] = profile
-
         return profiles
 
     @staticmethod
-    def _from_dict(
-        data: dict[str, Any],
-        stemmer: Stemmer | None = None,
-        source: str = "<unknown>",
-    ) -> LanguageProfile:
-        _validate_pack(data, source)
-
-        suffixes = data.get("suffix_rules", [])
-
+    def _from_dict(data: Any, stemmer: Stemmer | None, source: str) -> LanguageProfile:
+        data = _validate_pack(data, source)
         if stemmer is None:
-            if suffixes:
-                stemmer = SuffixStripper(suffixes)
-            else:
-                stemmer = _IdentityStemmer()
-
-        context_rules = {
-            k: set(v) for k, v in data.get("context_rules", {}).items()
-        }
-
+            suffixes = data.get("suffix_rules", [])
+            stemmer = SuffixStripper(suffixes) if suffixes else _IdentityStemmer()
         return LanguageProfile(
             language_code=data["language_code"],
             language_name=data["language_name"],
             bad_words=set(data["bad_words"]),
             stemmer=stemmer,
-            context_rules=context_rules,
+            context_rules={k: set(v) for k, v in data.get("context_rules", {}).items()},
+            word_categories=dict(data.get("word_categories", {})),
+            aliases=dict(data.get("aliases", {})),
+            scripts=tuple(data.get("scripts", ())),
             min_word_length=data.get("min_word_length", 2),
             version=data.get("version", "1.0.0"),
             description=data.get("description", ""),

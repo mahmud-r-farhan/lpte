@@ -30,8 +30,8 @@ class TestLanguagePackLoader:
         data = {
             "language_code": "test",
             "language_name": "Test Language",
-            "bad_words": ["bad1", "bad2"],
-            "context_rules": {"bad1": ["good1"]},
+            "bad_words": ["badone", "badtwo"],
+            "context_rules": {"badone": ["goodone"]},
             "min_word_length": 2,
             "suffix_rules": ["ed", "ing", "s"],
         }
@@ -39,16 +39,16 @@ class TestLanguagePackLoader:
 
         assert profile.language_code == "test"
         assert profile.language_name == "Test Language"
-        assert "bad1" in profile.bad_words
-        assert "bad2" in profile.bad_words
-        assert profile.context_rules["bad1"] == {"good1"}
+        assert "badone" in profile.bad_words
+        assert "badtwo" in profile.bad_words
+        assert profile.context_rules["badone"] == {"goodone"}
         assert profile.min_word_length == 2
 
     def test_load_file(self):
         data = {
             "language_code": "test",
             "language_name": "Test",
-            "bad_words": ["word1"],
+            "bad_words": ["wordone"],
         }
         fd, path = tempfile.mkstemp(suffix=".json")
         try:
@@ -56,7 +56,7 @@ class TestLanguagePackLoader:
                 json.dump(data, f)
             profile = LanguagePackLoader.load_file(path)
             assert profile.language_code == "test"
-            assert "word1" in profile.bad_words
+            assert "wordone" in profile.bad_words
         finally:
             os.unlink(path)
 

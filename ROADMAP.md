@@ -1,86 +1,25 @@
-# LPTE Roadmap
+# LPTE roadmap
 
-## Current Release — v1.0.0
+## Python core / CLI — v1.2.0 (this change)
 
-- Core toxicity engine with multi-signal classification
-- Bengali and English language packs
-- JSON language pack loader
-- 10 platform wrappers (Python, Flutter, Android, iOS, React Native, Node.js, Go, Rust, .NET, PHP)
-- Web demo with React chat UI
-- 78 tests covering bypass tricks and edge cases
+- [x] Multi-signal normalization and classification, phrase/alias matching, prefix-guarded indexed edit-distance-one lookup
+- [x] Categories, harm-aware severity, three moderation policy presets, custom policy thresholds and wordlists
+- [x] Mixed-script routing (`MultiLangEngine`), bounded threshold-free caches, async and batch APIs
+- [x] Sanitization using normalized-to-original spans, including obfuscated and unspaced-script text
+- [x] Data-only JSON packs with validation, categories, aliases, suffixes, context rules and Unicode-script hints
+- [x] CLI: analyze, sanitize, stream batch, languages, init-pack, validate, bench, eval
+- [x] Eleven built-in profiles; JSON versions of their vocabulary and categories checked for parity
+- [x] Hand-written evaluation regression guard (83 cases); CI with Python-version tests and pack validation
 
----
+**Release note:** the existing platform subprocess wrappers and external web UI assets have not been made fully offline or guaranteed to implement the new v1.2 features. The Python core is the tested integration path; the optional FastAPI demo exposes categories/policy as an HTTP service. This is a rule engine, not a calibrated model or a 100%-accurate toxicity classifier.
 
-## v1.1 — Language Expansion
+## Next priorities (not shipped)
 
-- [ ] Hindi language pack with stemmer
-- [ ] Spanish language pack with stemmer
-- [ ] Arabic language pack with stemmer
-- [ ] Urdu language pack with stemmer
-- [ ] French language pack with stemmer
-- [ ] Community-contributed language pack guidelines
-- [ ] Language pack validation CLI tool
+1. Collect **held-out, consented, community-specific** evaluation data with separate metrics for slurs/threats and false positives. The checked-in corpus is too small and tuned to prove accuracy.
+2. Broaden Banglish/Hinglish/other romanized vocabulary and curate dialect-specific ambiguous terms. `aliases` and `scripts` now make this a data change; coverage still needs native-speaker review.
+3. Design safe negation/quotation/context-window rules before automatic suppression, including regression cases where benign and harmful terms coexist.
+4. Bring platform wrappers into feature parity with Python APIs; add CI/integration tests for their IPC protocols and permissions.
+5. Add opt-in, privacy-preserving rule telemetry; do not log raw chat without a retention and access-control plan.
+6. Explore robust model-assisted escalation and production rate limiting **after** validating failure modes and deployment/privacy requirements.
 
-## v1.2 — Detection Improvements
-
-- [ ] Contextual negation detection ("not bad" → clean)
-- [ ] Multi-word phrase detection
-- [ ] Weighted scoring per language (tunable thresholds)
-- [ ] Confidence calibration with real-world datasets
-- [ ] Custom user wordlists (whitelist/blacklist)
-- [ ] Regex pattern support in language packs
-
-## v1.3 — Performance & Scale
-
-- [ ] C extension for hot-path normalization (Cython/Rust FFI)
-- [ ] Batch analysis API for processing multiple strings
-- [ ] Async analysis support (Python asyncio)
-- [ ] Memory-efficient streaming mode for large texts
-- [ ] Benchmark suite with standardized datasets
-
-## v1.4 — Model-Based Detection
-
-- [ ] Optional TFLite/ONNX model integration
-- [ ] Training pipeline for custom toxicity classifiers
-- [ ] Transfer learning from multilingual models
-- [ ] Hybrid mode: rule-based + ML scoring
-- [ ] Model versioning and hot-swap support
-
-## v1.5 — Platform & Integration
-
-- [ ] Kotlin Multiplatform (shared core for Android/iOS/JVM)
-- [ ] WebAssembly target for browser-based analysis
-- [ ] Ruby gem wrapper
-- [ ] Java/C# NuGet package publishing
-- [ ] Docker image for API deployment
-- [ ] Kubernetes Helm chart
-
-## v2.0 — Production Features
-
-- [ ] Rate limiting and abuse prevention
-- [ ] Analytics dashboard for moderation metrics
-- [ ] Webhook support for real-time content filtering
-- [ ] Plugin system for custom detection pipelines
-- [ ] Multi-language simultaneous detection
-- [ ] Audit logging and compliance reports
-
----
-
-## Community Goals
-
-- [ ] Reach 100 language packs
-- [ ] 1000+ GitHub stars
-- [ ] Integration guides for Discord, Telegram, Slack bots
-- [ ] Academic paper on the classification approach
-- [ ] Conference talks and workshops
-
----
-
-## How to Contribute
-
-Pick any unchecked item from this roadmap and open an issue or PR. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-Priority labels:
-- `good-first-issue` — beginner friendly
-- `help-wanted` — community contribution needed
-- `core` — maintainers only
+See [REAL_WORLD_USECASES.md](REAL_WORLD_USECASES.md) and [CONTRIBUTING.md](CONTRIBUTING.md) for measurement and pack-maintenance procedures.
