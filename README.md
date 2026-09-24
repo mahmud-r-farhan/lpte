@@ -7,13 +7,77 @@ LPTE is an open-source Python library for detecting and filtering toxic, profane
 ## Features
 
 - **100% Offline** — No network calls, no cloud APIs, no data leaving the device
-- **<25ms Latency** — Sub-25ms per text string evaluation with built-in LRU caching
+- **Sub-millisecond** — ~0.05 ms per chat line, ~4 ms for a long comment (7× faster than v1.0)
 - **11 Built-in Languages** — English, Bengali, Chinese, Japanese, Korean, Russian, Spanish, Hindi, French, German, Arabic
 - **Bypass-Resistant** — Catches leetspeak, character insertion, zero-width chars, homoglyphs, word splitting
+- **Content Categories** — Distinguishes `profanity` / `insult` / `sexual` / `slur` / `threat` so each harm type gets a different response
+- **Moderation Policies** — Preset or custom rules that return an action: `ALLOW` / `FLAG` / `MASK` / `BLOCK`
+- **Code-Switching** — Handles mixed-script chat (Banglish, Hinglish) via script routing
 - **Stemming** — Language-aware suffix, particle, and affix stripping across Latin, Cyrillic, Devanagari, Bengali, Arabic, Hangul, Kana, and CJK
-- **Batch & HTML Support** — Process batches or raw HTML directly with tag stripping
+- **Batch, HTML & Async** — Process batches, raw HTML, or await results off the event loop
+- **CLI Included** — `lpte analyze | sanitize | batch | validate | languages | bench`
 - **Zero Dependencies** — Pure Python, no external packages required
 - **Pluggable Architecture** — Drop in a JSON language file, no code changes needed
+
+> Deploying this for real? Read [`REAL_WORLD_USECASES.md`](REAL_WORLD_USECASES.md)
+> for integration patterns, tuning procedure, and honest limitations.
+
+## Quick Start (Production Shape)
+
+Detection alone is not a product decision — you need to know what to **do**.
+LPTE separates the four concerns:
+
+```python
+from lpte import LpteEngine, MultiLangEngine, get_policy
+from lpte.languages import EnglishProfile, BengaliProfile
+
+engine = LpteEngine(EnglishProfile)
+policy = get_policy("balanced")     # strict | balanced | lenient
+
+result   = engine.analyze("you are a fucking idiot")
+decision = policy.decide(result)
+
+print(decision.action.name)   # MASK
+print(result.categories)      # ['profanity']
+
+if decision.action.name == "BLOCK":
+    reject(result.matched_terms)
+elif decision.action.name == "MASK":
+    publish(engine.sanitize("you are a fucking idiot"))
+    # → "you are a ******* *****"
+else:
+    publish("you are a fucking idiot")   # ALLOW and FLAG both publish
+```
+
+The same confidence produces different actions depending on the harm:
+
+| Message | Confidence | Category | Severity | balanced → | lenient → |
+|---|---|---|---|---|---|
+| `damn this is good` | 0.80 | profanity | HIGH | MASK | ALLOW |
+| `you are so stupid and ugly` | 1.00 | insult | HIGH | MASK | FLAG |
+| `you nigger` | 0.80 | slur | CRITICAL | **BLOCK** | **BLOCK** |
+| `I will kill you` | 0.70 | threat | CRITICAL | **BLOCK** | **BLOCK** |
+| `please kill the background process` | 0.00 | — | NONE | ALLOW | ALLOW |
+
+### Mixed-script chat (Banglish / Hinglish)
+
+```python
+engine = MultiLangEngine([BengaliProfile, EnglishProfile])
+engine.analyze("তুই একদম idiot")      # → toxic (matched "idiot")
+engine.analyze("কুত্তা")               # → toxic (matched "কুত্তা")
+engine.analyze("আমি বাংলায় কথা বলি")   # → clean
+```
+
+### Command line
+
+```bash
+lpte analyze "you are a fucking idiot" --policy balanced
+lpte analyze "তুই একদম idiot" --lang bn+en
+lpte sanitize "f4ck this bullsh1t"          # → "**** this ********"
+lpte batch comments.txt --policy strict --json
+lpte validate languages/my_pack.json
+lpte bench
+```
 
 ## Supported Languages
 
@@ -48,7 +112,7 @@ LPTE is an open-source Python library for detecting and filtering toxic, profane
 
 All platform wrappers communicate with the Python core engine via subprocess IPC, with optional embedded Python for production deployments.
 
-## Quick Start
+## Detailed Usage
 
 ### Install
 
@@ -158,7 +222,11 @@ lpte/
 │   │   ├── stemmer.py         # Abstract stemmer interface
 │   │   ├── profile.py         # Language profile dataclass
 │   │   ├── loader.py          # JSON-based dynamic language loading
-│   │   └── engine.py          # High-level API
+│   │   ├── engine.py          # High-level API (analyze, sanitize, batch, async)
+│   │   ├── multilang.py       # Code-switched / mixed-script detection
+│   │   ├── policy.py          # Moderation actions (ALLOW/FLAG/MASK/BLOCK)
+│   │   └── cache.py           # Thread-safe LRU cache
+│   ├── cli.py                 # `lpte` command-line interface
 │   └── languages/
 │       ├── bn.py              # Bengali language pack (stemmer + profile)
 │       └── en.py              # English language pack (stemmer + profile)
@@ -180,8 +248,10 @@ lpte/
 │   ├── dotnet/                # .NET/C# wrapper
 │   └── php/                   # PHP wrapper
 │
-├── tests/                     # 78 test cases
-└── example/                   # Demo application
+├── tests/                     # 313 test cases
+├── example/                   # Demo application
+├── REAL_WORLD_USECASES.md     # Integration patterns, tuning, limitations
+└── ROADMAP.md                 # What's next
 ```
 
 ## How It Works
@@ -211,13 +281,35 @@ Normalized text is split into words, then analyzed at multiple granularities:
 Four independent signals contribute to a weighted score:
 
 | Signal | Weight | Description |
+| Signal | Weight | Description |
 |--------|--------|-------------|
 | Exact match | 1.0 | Direct root-word match |
 | Stemmed match | 0.85 | Match after suffix stripping |
-| N-gram match | 0.7 | Bigram/trigram overlap detection |
-| Fragment match | 0.4 | Character-level partial matches |
+| Phrase match | 0.80 | Bigram/trigram vs multi-word vocabulary entries |
+| Concatenated match | 0.70 | Split-word bypasses ("f u c k" → "fuck") |
+| Fuzzy match | 0.65 | Edit distance ≤ 1 (typo / single-char obfuscation) |
 
 The weighted score is normalized to a 0–1 confidence value. A configurable threshold (default 0.6) determines the binary classification.
+
+### 4. Context Rules (false-positive suppression)
+
+A matched word is **not** reported when either:
+
+1. the matched token *is* a known clean variant (the word `class` for `ass`), or
+2. every occurrence of the word in the text lies inside a known-benign
+   compound — Japanese `豚` (insult) inside `豚肉` (pork), Bengali `পাগল`
+   inside the idiom `পাগলের মতো`, English `kill` inside `kill the process`.
+
+The coverage rule matters: a benign word appearing **elsewhere** in a message
+never masks a real violation. `"I passed the exam. you ass!"` is still toxic.
+
+### 5. Categories, Severity and Remediation
+
+Matched terms map to a content category (`profanity`, `insult`, `sexual`,
+`slur`, `threat`). Slurs and threats escalate one severity level; swearing and
+insults are capped at `HIGH` so two insults never outrank a slur. A
+`ModerationPolicy` then turns severity + category into an action:
+`ALLOW`, `FLAG`, `MASK` or `BLOCK`.
 
 ## Adding a New Language
 
@@ -231,7 +323,12 @@ Create a JSON file:
   "language_name": "Français",
   "bad_words": ["word1", "word2", "word3"],
   "context_rules": {
-    "word1": ["negator1", "negator2"]
+    "word1": ["benign compound", "another benign phrase"]
+  },
+  "word_categories": {
+    "word1": "profanity",
+    "word2": "slur",
+    "word3": "threat"
   },
   "min_word_length": 2,
   "suffix_rules": ["tion", "ment", "eur", "eux", "es", "s"]
@@ -279,24 +376,43 @@ pytest --cov=lpte --cov-report=term-missing
 pytest tests/test_bypass_tricks.py -v
 ```
 
-The test suite covers:
-- **78 test cases** across all modules
+The test suite covers **313 cases** across:
 - Bypass trick detection (leetspeak, zero-width, word splitting, etc.)
 - False positive prevention (clean words containing profanity substrings)
-- Bengali stemmer validation
-- English stemmer validation
-- JSON language pack loading
-- Performance budget verification (<25ms)
+- Context-rule correctness (benign compounds, unspaced-script compounds)
+- Bengali/English stemmer validation
+- Content categories and severity calibration
+- Moderation policy decisions (allowlist, denylist, per-category thresholds)
+- Multi-language / code-switched detection
+- Sanitization of obfuscated surface forms
+- CLI behaviour
+- Performance regression budgets
 
 ## Performance
 
-Target: **<25ms per text evaluation** on standard hardware.
+Measured with `lpte bench` on a single core, cache disabled:
 
-The engine achieves this through:
-- HashMap-based O(1) word lookups
-- Pure Python with no external dependencies
-- Minimal object allocation in hot paths
-- Pre-computed suffix tables for stemming
+| Workload | v1.0 | v1.2 | Change |
+|---|---|---|---|
+| Chat line (~5 words) | 0.251 ms | **0.050 ms** | 5.0× faster |
+| Paragraph (~20 words) | 0.788 ms | **0.139 ms** | 5.7× faster |
+| Long comment (200 words) | 27.74 ms | **3.69 ms** | 7.5× faster |
+| Obfuscated text | 0.057 ms | **0.024 ms** | 2.4× faster |
+| Batch throughput | 4,464/s | **19,492/s** | 4.4× higher |
+
+The worst case is long **clean** text, because every pipeline stage has to run
+before the engine can conclude there is nothing there — that is the case the
+optimisation work targeted.
+
+How it stays fast:
+- Bulk character mapping via `str.translate` (C-level) instead of per-character Python loops
+- Memoized Unicode category lookups and stemming results
+- Indexed suffix tables (bucketed by final character) instead of linear scans
+- SymSpell-style delete-1 index for fuzzy matching — O(word length), not O(vocabulary)
+- Threshold-free cache keys, so one cache entry serves every threshold
+- Script routing, so mixed-script text only runs the engines that could match
+
+Run `lpte bench` to reproduce on your own hardware.
 
 ## Live Demo
 

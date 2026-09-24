@@ -737,6 +737,9 @@
     const LANGUAGES = [
       { code: "en", name: "English", flag: "🇬🇧" },
       { code: "bn", name: "বাংলা (Bengali)", flag: "🇧🇩" },
+      { code: "bn+en", name: "বাংলা + English (Banglish)", flag: "🇧🇩" },
+      { code: "hi+en", name: "हिन्दी + English (Hinglish)", flag: "🇮🇳" },
+      { code: "auto", name: "Auto (all 11 languages)", flag: "🌐" },
       { code: "zh", name: "中文 (Chinese)", flag: "🇨🇳" },
       { code: "ja", name: "日本語 (Japanese)", flag: "🇯🇵" },
       { code: "ko", name: "한국어 (Korean)", flag: "🇰🇷" },
@@ -756,12 +759,38 @@
       CRITICAL: { color: "#f43f5e", bg: "rgba(244, 63, 94, 0.18)", border: "rgba(244, 63, 94, 0.4)", label: "CRITICAL" },
     };
 
+    // ─── Moderation Policy ────────────────────────────────────────────────────
+    // Detection is only half the job — the policy decides what to DO about it.
+    const POLICIES = [
+      { code: "",           name: "No policy (detect only)" },
+      { code: "strict",     name: "Strict — kids / classroom" },
+      { code: "balanced",   name: "Balanced — general community" },
+      { code: "lenient",    name: "Lenient — gaming / adult forum" },
+    ];
+
+    const ACTION_CONFIG = {
+      ALLOW: { color: "#10b981", bg: "rgba(16, 185, 129, 0.12)",  border: "rgba(16, 185, 129, 0.3)",  label: "ALLOW", hint: "publish as-is" },
+      FLAG:  { color: "#facc15", bg: "rgba(250, 204, 21, 0.12)",  border: "rgba(250, 204, 21, 0.3)",  label: "FLAG",  hint: "publish + review" },
+      MASK:  { color: "#fb923c", bg: "rgba(251, 146, 60, 0.12)",  border: "rgba(251, 146, 60, 0.3)",  label: "MASK",  hint: "publish censored" },
+      BLOCK: { color: "#f43f5e", bg: "rgba(244, 63, 94, 0.18)",   border: "rgba(244, 63, 94, 0.4)",   label: "BLOCK", hint: "reject content" },
+    };
+
+    // Harm category badges — the same confidence means different things for
+    // a swear vs a slur vs a threat.
+    const CATEGORY_CONFIG = {
+      profanity: { color: "#94a3b8", label: "profanity" },
+      insult:    { color: "#fbbf24", label: "insult" },
+      sexual:    { color: "#f472b6", label: "sexual" },
+      slur:      { color: "#f87171", label: "slur" },
+      threat:    { color: "#ef4444", label: "threat" },
+    };
+
     // ─── API Helpers ──────────────────────────────────────────────────────────
-    async function apiAnalyze(text, language, threshold) {
+    async function apiAnalyze(text, language, threshold, policy) {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, language, threshold }),
+        body: JSON.stringify({ text, language, threshold, policy: policy || null }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -770,11 +799,11 @@
       return res.json();
     }
 
-    async function apiBatch(texts, language, threshold) {
+    async function apiBatch(texts, language, threshold, policy) {
       const res = await fetch('/api/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ texts, language, threshold }),
+        body: JSON.stringify({ texts, language, threshold, policy: policy || null }),
       });
       if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || 'Batch failed'); }
       return res.json();
@@ -796,7 +825,7 @@
     }
 
     // ─── Real-time Preview Component ──────────────────────────────────────────
-    function RealtimePreview({ text, language, threshold }) {
+    function RealtimePreview({ text, language, threshold, policy }) {
       const [result, setResult] = useState(null);
       const [loading, setLoading] = useState(false);
       const debounced = useDebounce(text, 250);
@@ -804,10 +833,10 @@
       useEffect(() => {
         if (!debounced.trim() || debounced.length < 2) { setResult(null); return; }
         setLoading(true);
-        apiAnalyze(debounced, language, threshold)
+        apiAnalyze(debounced, language, threshold, policy)
           .then(r => { setResult(r); setLoading(false); })
           .catch(() => { setResult(null); setLoading(false); });
-      }, [debounced, language, threshold]);
+      }, [debounced, language, threshold, policy]);
 
       if (!text.trim()) return null;
 
@@ -835,7 +864,7 @@
     }
 
     // ─── Chat View ────────────────────────────────────────────────────────────
-    function ChatTab({ language, setLanguage, threshold }) {
+    function ChatTab({ language, setLanguage, threshold, policy }) {
       const [messages, setMessages] = useState([]);
       const [input, setInput] = useState('');
       const [loading, setLoading] = useState(false);
@@ -855,7 +884,7 @@
         setMessages(prev => [...prev, { id: Date.now(), text: trimmed, isUser: true, timestamp: getNow() }]);
         setLoading(true);
         try {
-          const result = await apiAnalyze(trimmed, lang, threshold);
+          const result = await apiAnalyze(trimmed, lang, threshold, policy);
           setMessages(prev => [...prev, { id: Date.now()+1, text: trimmed, result, isUser: false, timestamp: getNow() }]);
         } catch (err) {
           setMessages(prev => [...prev, {
@@ -959,6 +988,16 @@
                             <span className="badge-severity" style={{ color: sevCfg.color, background: sevCfg.bg, borderColor: sevCfg.border }}>
                               {sevCfg.label}
                             </span>
+                            {r?.decision && (() => {
+                              const a = r.decision.action;
+                              const aCfg = ACTION_CONFIG[a] || ACTION_CONFIG.ALLOW;
+                              return (
+                                <span className="badge-severity" title={`${r.decision.reason} — ${aCfg.hint}`}
+                                      style={{ color: aCfg.color, background: aCfg.bg, borderColor: aCfg.border }}>
+                                  {aCfg.label}
+                                </span>
+                              );
+                            })()}
                           </div>
                           {r?.latency_ms != null && (
                             <span className="mono" style={{ fontSize:11, color:'var(--text-muted)' }}>{r.latency_ms}ms</span>
@@ -981,6 +1020,15 @@
                         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, flexWrap:'wrap' }}>
                           <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
                             <span className="mono" style={{ fontSize:11, color:'var(--text-muted)' }}>{((r?.confidence || 0) * 100).toFixed(1)}% match</span>
+                            {r?.categories?.map((c, idx) => {
+                              const cCfg = CATEGORY_CONFIG[c] || CATEGORY_CONFIG.profanity;
+                              return (
+                                <span key={`cat-${idx}`} className="matched-chip" title={`content category: ${c}`}
+                                      style={{ color: cCfg.color, borderColor: cCfg.color, opacity: 0.95 }}>
+                                  {cCfg.label}
+                                </span>
+                              );
+                            })}
                             {r?.matched_terms?.map((t, idx) => (
                               <span key={idx} className="matched-chip">{t}</span>
                             ))}
@@ -1050,7 +1098,7 @@
     }
 
     // ─── Batch View ───────────────────────────────────────────────────────────
-    function BatchTab({ language, threshold }) {
+    function BatchTab({ language, threshold, policy }) {
       const [input, setInput] = useState('');
       const [results, setResults] = useState(null);
       const [loading, setLoading] = useState(false);
@@ -1062,7 +1110,7 @@
         if (!lines.length) return;
         setLoading(true); setError(null);
         try {
-          const data = await apiBatch(lines, language, threshold);
+          const data = await apiBatch(lines, language, threshold, policy);
           setResults(data.results);
           setSummary({ total: data.total, toxic: data.toxic_count, latency: data.latency_ms });
         } catch (e) { setError(e.message); }
@@ -1252,6 +1300,7 @@
       const [activeTab, setActiveTab] = useState('chat');
       const [language, setLanguage] = useState('en');
       const [threshold, setThreshold] = useState(0.6);
+      const [policy, setPolicy] = useState('balanced');
 
       return (
         <>
@@ -1266,7 +1315,7 @@
                 </div>
                 <div>
                   <div className="brand-title">LPTE Engine</div>
-                  <div className="brand-subtitle">Local Profanity & Toxicity Engine v1.1.0</div>
+                  <div className="brand-subtitle">Local Profanity & Toxicity Engine v1.2.0</div>
                 </div>
               </div>
 
@@ -1302,6 +1351,15 @@
                   </select>
                 </div>
 
+                <div className="select-pill">
+                  <select value={policy} onChange={e => setPolicy(e.target.value)}
+                          title="What should the app DO about a violation?">
+                    {POLICIES.map(p => (
+                      <option key={p.code} value={p.code}>⚖️ {p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="slider-box">
                   <span className="slider-label">Threshold</span>
                   <input
@@ -1318,8 +1376,8 @@
           </header>
 
           <main className="app-main">
-            {activeTab === 'chat'  && <ChatTab  language={language} setLanguage={setLanguage} threshold={threshold} />}
-            {activeTab === 'batch' && <BatchTab language={language} threshold={threshold} />}
+            {activeTab === 'chat'  && <ChatTab  language={language} setLanguage={setLanguage} threshold={threshold} policy={policy} />}
+            {activeTab === 'batch' && <BatchTab language={language} threshold={threshold} policy={policy} />}
             {activeTab === 'stats' && <StatsTab />}
           </main>
         </>

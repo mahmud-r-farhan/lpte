@@ -9,8 +9,31 @@ Scoring approach:
 
 Context rules suppress false positives: if a bad word has context rules
 and the input word is a known clean variant, the match is skipped.
+Multi-word clean entries (idioms such as "পাগলের মতো") suppress matches
+when the full phrase appears in the raw text; single-word clean variants
+only suppress at word level — a benign word elsewhere in the text never
+masks real toxicity (e.g. "passed" no longer hides "ass").
 
 min_word_length from LanguageProfile is enforced before any matching.
+
+Matched terms are mapped to content categories (slur / threat / sexual /
+profanity) via LanguageProfile.word_categories. Slur and threat matches
+escalate severity by one level, reflecting real-world moderation practice
+where identity attacks and threats warrant stronger action than plain
+profanity at the same confidence.
+
+Performance notes (on-device focus):
+- Per-profile lookup structures (multi-word phrase set, vocabulary length
+  index, SymSpell-style delete-1 neighborhood for fuzzy matching) are built
+  once and cached on the Classifier instance.
+- Fuzzy matching is O(word_length) per token instead of O(vocabulary):
+  candidate bad words are pulled from a delete-1 index, then verified with
+  the exact edit-distance-1 predicate (identical semantics, no
+  transposition false positives).
+- Concatenation matching checks vocabulary-length slices against the word
+  set instead of substring-scanning the whole vocabulary per window.
+- Stemming is memoized per classify() call — bigram/trigram words overlap
+  heavily with unigrams.
 """
 
 from __future__ import annotations
@@ -32,6 +55,23 @@ class Severity(IntEnum):
     CRITICAL = 4
 
 
+# ─── Content Categories ───────────────────────────────────────────────────────
+
+CATEGORY_PROFANITY = "profanity"   # default for unmatched vocabulary entries
+CATEGORY_SLUR = "slur"             # identity-based attacks
+CATEGORY_THREAT = "threat"         # violence, self-harm incitement
+CATEGORY_SEXUAL = "sexual"         # sexually explicit / degrading terms
+
+# Categories that escalate severity by one level when matched.
+_ESCALATING_CATEGORIES = frozenset({CATEGORY_SLUR, CATEGORY_THREAT})
+
+# Categories that can never reach CRITICAL on their own. Two insult words
+# score the same as two slurs (confidence counts matches, not harm), so
+# without this cap "you are so stupid and ugly" would rank alongside a death
+# threat. CRITICAL is reserved for identity attacks, threats and sexual harm.
+_CAP_AT_HIGH_CATEGORIES = frozenset({CATEGORY_PROFANITY, "insult"})
+
+
 @dataclass
 class ClassificationResult:
     """Full result of a toxicity classification."""
@@ -41,6 +81,11 @@ class ClassificationResult:
     confidence: float
     matched_terms: list[str]
     signals: dict[str, int] = field(default_factory=dict)
+    # Content categories of matched terms (e.g. ["profanity", "slur"]).
+    categories: list[str] = field(default_factory=list)
+    # Language code of the engine that produced this result (set by
+    # MultiLangEngine; empty for single-language engines).
+    language: str = ""
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -69,27 +114,152 @@ def _edit_distance_1(s: str, t: str) -> bool:
     return True
 
 
+def _find_all(haystack: str, needle: str) -> list[int]:
+    """Return start offsets of every (possibly overlapping) occurrence."""
+    out: list[int] = []
+    start = haystack.find(needle)
+    while start != -1:
+        out.append(start)
+        start = haystack.find(needle, start + 1)
+    return out
+
+
 def _is_context_clean(
     word: str,
     bad_word: str,
     context_rules: dict[str, set[str]],
     raw_text: str = "",
 ) -> bool:
-    """Check if a word is a known clean variant or inside a clean compound word."""
-    clean_words = context_rules.get(bad_word, set())
+    """
+    Check if a matched bad word is actually a known-benign usage.
+
+    Two mechanisms, both deliberately narrow:
+
+    1. Word-level: the matched token *is* a known clean variant
+       (e.g. the word "class" for bad word "ass").
+    2. Coverage: every occurrence of the bad word's literal form in the raw
+       text lies inside an occurrence of a benign compound/idiom that contains
+       it. This is what makes unspaced scripts work — Japanese "豚" (insult)
+       is clean inside "豚肉" (pork), Bengali "পাগল" is clean inside the
+       idiom "পাগলের মতো".
+
+    Crucially, a benign word appearing *elsewhere* in the text never masks a
+    real match: "I passed the exam, you ass" still flags "ass", because the
+    second occurrence is not covered by "pass".
+    """
+    clean_words = context_rules.get(bad_word)
     if not clean_words:
         return False
     if word in clean_words:
         return True
-    if raw_text and any(clean in raw_text for clean in clean_words):
-        return True
+    if not raw_text:
+        return False
+
+    # Only compounds/idioms that actually contain the bad word can cover it.
+    covering = [c for c in clean_words if bad_word in c]
+    if not covering:
+        return False
+
+    starts = _find_all(raw_text, bad_word)
+    if not starts:
+        # Matched via stemming/obfuscation — the literal form is absent, so
+        # coverage cannot be established. Do not suppress (favour detection).
+        return False
+
+    end = len(raw_text)
+    bad_len = len(bad_word)
+    covered = [False] * len(starts)
+    remaining = len(starts)
+    for clean in covering:
+        clean_len = len(clean)
+        limit = end - clean_len
+        for cs in _find_all(raw_text, clean):
+            for k, s in enumerate(starts):
+                if not covered[k] and cs <= s and s + bad_len <= cs + clean_len:
+                    covered[k] = True
+                    remaining -= 1
+        if remaining == 0:
+            return True
     return False
+
+
+# ─── Precomputed Profile Index ────────────────────────────────────────────────
+
+class _ProfileIndex:
+    """
+    Lookup structures derived from a profile's vocabulary. Built once per
+    profile and cached on the Classifier. Holds a strong reference to the
+    bad_words set so its id() can never be recycled while cached.
+    """
+
+    __slots__ = ("bad_words", "multiword", "single_lengths", "fuzzy_index", "has_multiword")
+
+    # Fuzzy matching only applies to words of at least this length on both
+    # sides (guards against false positives from short common words).
+    MIN_FUZZY_LEN = 5
+
+    def __init__(self, bad_words: set[str]) -> None:
+        self.bad_words = bad_words
+        self.multiword = frozenset(w for w in bad_words if " " in w)
+        self.has_multiword = bool(self.multiword)
+        self.single_lengths = sorted({len(w) for w in bad_words if " " not in w})
+
+        # SymSpell-style delete-1 neighborhood: each bad word (len >= 5) is
+        # indexed under itself and all single-character deletions. A query
+        # word within edit distance 1 shares at least one key.
+        fuzzy_index: dict[str, list[str]] = {}
+        for w in sorted(bad_words):
+            if " " in w or len(w) < self.MIN_FUZZY_LEN:
+                continue
+            keys = {w}
+            for i in range(len(w)):
+                keys.add(w[:i] + w[i + 1:])
+            for k in keys:
+                bucket = fuzzy_index.get(k)
+                if bucket is None:
+                    fuzzy_index[k] = [w]
+                else:
+                    bucket.append(w)  # sorted iteration → deterministic order
+        self.fuzzy_index = fuzzy_index
+
+    def fuzzy_candidates(self, word: str):
+        """Yield vocabulary candidates within edit distance 1 of word (may repeat)."""
+        idx = self.fuzzy_index
+        cands = idx.get(word)
+        if cands:
+            yield from cands
+        for i in range(len(word)):
+            cands = idx.get(word[:i] + word[i + 1:])
+            if cands:
+                yield from cands
 
 
 # ─── Classifier ───────────────────────────────────────────────────────────────
 
 class Classifier:
     """Classifies tokenized text against a language profile."""
+
+    # Upper bound for the cross-call stem memo. Chat traffic repeats the same
+    # vocabulary heavily, and multi-variant analysis re-stems the same words,
+    # so this trades a small fixed memory budget for a large steady-state win.
+    STEM_MEMO_MAX = 4096
+
+    def __init__(self) -> None:
+        # id(bad_words) → (len(bad_words), index). The length guard makes a
+        # stale entry (mutated set) rebuild instead of serving wrong lookups.
+        self._indexes: dict[int, tuple[int, _ProfileIndex]] = {}
+        # Persistent stem memo, keyed per stemmer instance.
+        self._stem_cache: dict[str, str] = {}
+        self._stem_cache_stemmer: int | None = None
+
+    def _get_index(self, bad_words: set[str]) -> _ProfileIndex:
+        key = id(bad_words)
+        entry = self._indexes.get(key)
+        if entry is not None and entry[0] == len(bad_words):
+            return entry[1]
+        index = _ProfileIndex(bad_words)
+        self._indexes[key] = (len(bad_words), index)
+        return index
 
     def classify(
         self,
@@ -110,6 +280,26 @@ class Classifier:
         min_len = profile.min_word_length
         context_rules = profile.context_rules
         raw_text = tokens.raw_normalized
+        index = self._get_index(bad_words)
+
+        # Stem memoization: bigram/trigram words overlap unigrams, and the
+        # same words recur across the normalization variants and across
+        # messages. Rebound when the stemmer changes; capped to bound memory.
+        stemmer_id = id(profile.stemmer)
+        if self._stem_cache_stemmer != stemmer_id:
+            self._stem_cache.clear()
+            self._stem_cache_stemmer = stemmer_id
+        elif len(self._stem_cache) > self.STEM_MEMO_MAX:
+            self._stem_cache.clear()
+        stem_cache: dict[str, str] = self._stem_cache
+        stemmer_stem = profile.stemmer.stem
+
+        def stem(w: str) -> str:
+            s = stem_cache.get(w)
+            if s is None:
+                s = stemmer_stem(w)
+                stem_cache[w] = s
+            return s
 
         # Filter words by min_word_length for exact/stemmed matching
         words = [w for w in tokens.words if len(w) >= min_len]
@@ -119,14 +309,13 @@ class Classifier:
         # ── Signal 1: Exact + Stemmed match (single merged loop) ──────────────
         # Stem each word once and check both the stemmed and original forms.
         for word in words:
-            stemmed = profile.stemmer.stem(word)
-
             if word in bad_words:
                 if not _is_context_clean(word, word, context_rules, raw_text):
                     matched_terms.append(word)
                     signals["exact_match"] += 1
                     continue
 
+            stemmed = stem(word)
             if stemmed != word and stemmed in bad_words:
                 if not _is_context_clean(word, stemmed, context_rules, raw_text):
                     matched_terms.append(stemmed)
@@ -135,42 +324,61 @@ class Classifier:
         # ── Signal 2: Phrase match — bigrams and trigrams vs bad word set ──────
         # This catches multi-word toxic phrases not caught by single-word matching.
         if not matched_terms:
+            multiword = index.multiword
             all_ngrams = tokens.bigrams + tokens.trigrams
             for ngram in all_ngrams:
-                # Check the raw n-gram and its stemmed components
+                # Check the raw n-gram and its space-stripped form
                 ngram_joined = ngram.replace(" ", "")
-                if ngram in bad_words or ngram_joined in bad_words:
-                    matched_bad = ngram if ngram in bad_words else ngram_joined
+                if ngram in multiword or ngram_joined in bad_words:
+                    matched_bad = ngram if ngram in multiword else ngram_joined
                     if not _is_context_clean(ngram, matched_bad, context_rules, raw_text):
                         matched_terms.append(ngram)
                         signals["phrase_match"] += 1
                         break
-                # Also try stemming each word in the n-gram
-                ngram_words = ngram.split()
-                stemmed_ngram = " ".join(profile.stemmer.stem(w) for w in ngram_words)
-                if stemmed_ngram in bad_words:
-                    if not _is_context_clean(ngram, stemmed_ngram, context_rules, raw_text):
-                        matched_terms.append(stemmed_ngram)
-                        signals["phrase_match"] += 1
-                        break
+                # Stemmed n-gram contains a space, so it can only match
+                # multi-word vocabulary entries — skip entirely when the
+                # profile has none.
+                if index.has_multiword:
+                    stemmed_ngram = " ".join(stem(w) for w in ngram.split())
+                    if stemmed_ngram in multiword:
+                        if not _is_context_clean(ngram, stemmed_ngram, context_rules, raw_text):
+                            matched_terms.append(stemmed_ngram)
+                            signals["phrase_match"] += 1
+                            break
 
         # ── Signal 3: Concatenated-word detection ("f u c k" → "fuck") ─────────
         # Uses all_words (unfiltered) so single-char split words are included.
         if not matched_terms and len(all_words) >= 2:
-            for window_size in range(2, min(len(all_words) + 1, 6)):
+            lengths = index.single_lengths
+            n_words = len(all_words)
+            for window_size in range(2, min(n_words + 1, 6)):
                 found = False
-                for i in range(len(all_words) - window_size + 1):
+                for i in range(n_words - window_size + 1):
                     window = all_words[i: i + window_size]
                     # Only try windows of short single-char/double-char words
                     if all(len(w) <= 3 for w in window):
                         concatenated = "".join(window)
-                        for bad_word in bad_words:
-                            if bad_word in concatenated:
-                                if not _is_context_clean(concatenated, bad_word, context_rules, raw_text):
-                                    matched_terms.append(bad_word)
-                                    signals["concat_match"] += 1
-                                    found = True
+                        concat_len = len(concatenated)
+                        # Slice-based substring search: a vocabulary word is a
+                        # substring iff some length-matched slice equals it.
+                        term = None
+                        for bl in lengths:
+                            if bl > concat_len:
+                                break
+                            for pos in range(concat_len - bl + 1):
+                                cand = concatenated[pos: pos + bl]
+                                if cand in bad_words and not _is_context_clean(
+                                    concatenated, cand, context_rules, raw_text
+                                ):
+                                    term = cand
                                     break
+                            if term is not None:
+                                break
+                        if term is not None:
+                            matched_terms.append(term)
+                            signals["concat_match"] += 1
+                            found = True
+                            break
                     if found:
                         break
                 if found:
@@ -179,17 +387,22 @@ class Classifier:
         # ── Signal 4: Fuzzy matching — edit distance ≤ 1 ─────────────────────
         # Require both word and bad_word to be >= 5 chars to avoid false
         # positives from short common words ("today", "you", "are", etc.).
+        # Candidates come from the delete-1 index, then are verified with the
+        # exact edit-distance predicate (no transposition false positives).
         if not matched_terms:
+            min_fuzzy = _ProfileIndex.MIN_FUZZY_LEN
             for word in words:
-                if len(word) < 5:
+                if len(word) < min_fuzzy:
                     continue
-                for bad_word in bad_words:
-                    if len(bad_word) < 5:
+                tried: set[str] = set()
+                for cand in index.fuzzy_candidates(word):
+                    if cand in tried:
                         continue
-                    if abs(len(word) - len(bad_word)) <= 1 and _edit_distance_1(word, bad_word):
-                        if _is_context_clean(word, bad_word, context_rules, raw_text):
-                            continue
-                        matched_terms.append(bad_word)
+                    tried.add(cand)
+                    if _edit_distance_1(word, cand) and not _is_context_clean(
+                        word, cand, context_rules, raw_text
+                    ):
+                        matched_terms.append(cand)
                         signals["fuzzy_match"] += 1
                         break
 
@@ -223,10 +436,28 @@ class Classifier:
         else:
             severity = Severity.NONE
 
+        # ── Categories & severity escalation ──────────────────────────────────
+        # Deterministic dedupe (order-preserving) instead of set() iteration.
+        unique_terms = list(dict.fromkeys(matched_terms))
+        categories: list[str] = []
+        if unique_terms:
+            word_categories = profile.word_categories
+            cat_set = {word_categories.get(t, CATEGORY_PROFANITY) for t in unique_terms}
+            categories = sorted(cat_set)
+            # Slurs and threats escalate one severity level (capped): identity
+            # attacks warrant stronger action at the same confidence.
+            if cat_set & _ESCALATING_CATEGORIES:
+                if severity > Severity.NONE:
+                    severity = Severity(min(severity + 1, Severity.CRITICAL))
+            elif cat_set <= _CAP_AT_HIGH_CATEGORIES:
+                # Swearing and insults only — never critical on their own.
+                severity = Severity(min(severity, Severity.HIGH))
+
         return ClassificationResult(
             is_toxic=confidence >= threshold,
             severity=severity,
             confidence=confidence,
-            matched_terms=list(set(matched_terms)),
+            matched_terms=unique_terms,
             signals=signals,
+            categories=categories,
         )

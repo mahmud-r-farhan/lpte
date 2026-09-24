@@ -6,10 +6,16 @@ Supports:
 - CJK (Chinese, Japanese, Korean) sub-phrase and n-gram segmentation
 - Word-level n-gram generation (bigrams, trigrams)
 - Character-level n-gram generation for obfuscation detection
+
+Performance notes:
+- CJK detection uses a precompiled character-class regex (C-level scan)
+  instead of a per-character Python range check.
+- Sub-phrase de-duplication uses a set instead of an O(n) list scan.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -21,6 +27,21 @@ class TokenizationResult:
     bigrams: list[str]
     trigrams: list[str]
     raw_normalized: str
+
+
+# CJK ideographs, Hiragana, Katakana (incl. phonetic extensions),
+# Extension A and CJK Compatibility Ideographs.
+_CJK_RE = re.compile(
+    "["
+    "\u3040-\u309F"      # Hiragana
+    "\u30A0-\u30FF"      # Katakana
+    "\u31F0-\u31FF"      # Katakana Phonetic Extensions
+    "\u3400-\u4DBF"      # CJK Unified Ideographs Extension A
+    "\u4E00-\u9FFF"      # CJK Unified Ideographs
+    "\uF900-\uFAFF"      # CJK Compatibility Ideographs
+    "\U00020000-\U0002A6DF"  # Extension B
+    "]"
+)
 
 
 def _is_cjk_or_kana(c: str) -> bool:
@@ -54,12 +75,17 @@ class Tokenizer:
         words = list(base_words)
 
         # For unspaced East Asian scripts (CJK/Kana), generate sub-phrase & n-gram tokens
+        seen: set[str] | None = None
         for w in base_words:
-            if any(_is_cjk_or_kana(c) for c in w):
-                for n in range(1, min(len(w) + 1, 6)):
+            if _CJK_RE.search(w):
+                if seen is None:
+                    seen = set(words)
+                max_n = min(len(w) + 1, 6)
+                for n in range(1, max_n):
                     for i in range(len(w) - n + 1):
                         gram = w[i : i + n]
-                        if gram not in words:
+                        if gram not in seen:
+                            seen.add(gram)
                             words.append(gram)
 
         bigrams = self._generate_ngrams(base_words, 2)
