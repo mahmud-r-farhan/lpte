@@ -58,6 +58,16 @@ ENGLISH: list[tuple[str, bool]] = [
     ("Please take out the trash", CLEAN),
     ("The garbage truck is here", CLEAN),
     ("Please kill the background process", CLEAN),
+    # "kill" with an inanimate object: technical and idiomatic usage, not a
+    # threat. These are the cases that make a bare "kill" rule unusable.
+    ("I will kill the process", CLEAN),
+    ("I'm going to kill the background job", CLEAN),
+    ("this command will kill all docker containers", CLEAN),
+    ("the update will kill my old battery", CLEAN),
+    ("I will kill time until the train comes", CLEAN),
+    ("we gonna kill the mood", CLEAN),
+    ("kill the job and clean the db", CLEAN),
+    ("I will kill the process and then restart it", CLEAN),
     ("There is a trash can outside", CLEAN),
     ("Cockney accent is hard to imitate", CLEAN),
     ("The peacock spread its feathers", CLEAN),
@@ -97,6 +107,13 @@ ENGLISH: list[tuple[str, bool]] = [
     ("I will kill you", TOXIC),
     ("go die", TOXIC),
     ("kys", TOXIC),
+    # A threat hidden behind a cheaper match. These used to score HIGH on the
+    # insult alone while the CRITICAL threat one word later went unreported,
+    # because phrase matching was skipped once anything had matched.
+    ("you are such an idiot, go kill yourself", TOXIC),
+    ("you stupid bitch, im gonna kill you", TOXIC),
+    ("hey loser, I will kill you", TOXIC),
+    ("I will kill the process and you", TOXIC),
 ]
 
 BENGALI: list[tuple[str, bool]] = [
@@ -126,6 +143,24 @@ BENGALI: list[tuple[str, bool]] = [
     ("তুই একটা গাধা", TOXIC),
     ("সে একটা নষ্ট লোক", TOXIC),
     ("তুই নোংরা কথা বলিস", TOXIC),
+    # ── Toxic: the forms people actually type ─────────────────────────────────
+    # বোকাচোদা is the most common piece of abuse in Bengali chat and was
+    # entirely absent: it is a compound that never contains "চোদ" as a
+    # standalone token, and the "-া" ending is not (and must not be) stemmed.
+    ("তুই একদম বোকাচোদা", TOXIC),
+    ("বোকাচোদা", TOXIC),
+    ("বোকচোদ", TOXIC),
+    ("চোদা", TOXIC),
+    ("চুদা", TOXIC),
+    ("খানকির পোলা", TOXIC),
+    ("তুই সালা", TOXIC),
+    ("সালা কি করিস", TOXIC),
+    # ── Clean: the -া ending must NOT be stemmed ──────────────────────────────
+    # "বালা" means bangle; stripping the trailing -া to catch "বাল" would
+    # flag jewellery. These guard that decision.
+    ("আমি ভাত খাই", CLEAN),
+    ("তুমি কেমন আছো", CLEAN),
+    ("আমার বোন স্কুলে যায়", CLEAN),
 ]
 
 HINDI: list[tuple[str, bool]] = [

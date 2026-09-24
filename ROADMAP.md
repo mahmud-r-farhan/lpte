@@ -41,6 +41,13 @@
 - [x] Bengali: removed `দুধ` ("milk"); allowlisted benign collocations
 - [x] English: replaced bare `kill` with targeted threat phrases
 - [x] English: added bullying/insult vocabulary and context rules
+- [x] Phrase matching no longer suppressed by an earlier single-word match —
+      `"you are such an idiot, go kill yourself"` is a threat, not just an insult
+- [x] Benign-object guard: `"I will kill the process"` is sysadmin work, while
+      `"I will kill you"` and `"kill the process and you"` stay threats
+- [x] Bengali: added the forms actually typed — `বোকাচোদা` compounds, `চোদা`
+      conjugations and the colloquial `সালা` spelling (all previously clean)
+- [x] 406 tests (from 148)
 
 ## Previous Release — v1.0.0
 

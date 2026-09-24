@@ -124,6 +124,73 @@ def _find_all(haystack: str, needle: str) -> list[int]:
     return out
 
 
+# Articles/determiners skipped when looking for the object that follows a
+# matched phrase: "kill the process" and "kill process" mean the same thing.
+_DETERMINERS = frozenset(
+    {
+        "a", "an", "the", "this", "that", "these", "those",
+        "my", "your", "his", "her", "its", "our", "their",
+        "some", "any", "all", "no",
+    }
+)
+
+# Coordinators that signal another target is coming after the object.
+_COORDINATORS = frozenset({"and", "or", "then", "before", "after", "but"})
+
+# Words that make a coordinated second target a person, not a thing.
+# Deliberately excludes "boss" (everyday gaming vocabulary) and first-person
+# pronouns, which usually start a new clause rather than name a target
+# ("kill the process and I'll restart it").
+_PERSON_TARGETS = frozenset(
+    {
+        "you", "u", "your", "yourself", "yourselves", "him", "her", "them",
+        "us", "me", "everyone", "everybody", "someone", "somebody",
+        "people", "kids", "children", "family", "wife", "husband",
+        "girlfriend", "boyfriend", "mother", "father", "mom", "dad",
+        "brother", "sister", "friend", "friends", "neighbours", "neighbors",
+        "students", "teacher", "coworkers", "colleagues",
+    }
+)
+
+
+def _benign_object_follows(raw_text: str, phrase: str, objects: set[str]) -> bool:
+    """
+    True when every occurrence of `phrase` is followed by a benign object.
+
+    "I will kill the process" → the object of "will kill" is a process, so
+    the phrase is ordinary technical speech, not a threat. "I will kill the
+    process and then you" → only one of the two occurrences is benign, so we
+    report the match: when in doubt, flag.
+    """
+    phrase_len = len(phrase)
+    for start in _find_all(raw_text, phrase):
+        tail = raw_text[start + phrase_len : start + phrase_len + 40]
+        # Content words that follow the phrase, determiners removed.
+        following: list[str] = []
+        for token in tail.split():
+            token = token.strip(".,!?;:'\"()[]")
+            if not token or token in _DETERMINERS:
+                continue
+            following.append(token)
+            if len(following) >= 4:
+                break
+
+        # "kill the process and you" — a benign object must never mask a
+        # second, personal target. Checked over the whole window first, so an
+        # early benign object cannot hide it.
+        for i, token in enumerate(following):
+            if (
+                token in _COORDINATORS
+                and i + 1 < len(following)
+                and following[i + 1] in _PERSON_TARGETS
+            ):
+                return False
+
+        if not any(token in objects for token in following):
+            return False
+    return True
+
+
 def _is_context_clean(
     word: str,
     bad_word: str,
@@ -192,7 +259,14 @@ class _ProfileIndex:
     bad_words set so its id() can never be recycled while cached.
     """
 
-    __slots__ = ("bad_words", "multiword", "single_lengths", "fuzzy_index", "has_multiword")
+    __slots__ = (
+        "bad_words",
+        "multiword",
+        "multiword_starts",
+        "single_lengths",
+        "fuzzy_index",
+        "has_multiword",
+    )
 
     # Fuzzy matching only applies to words of at least this length on both
     # sides (guards against false positives from short common words).
@@ -202,6 +276,9 @@ class _ProfileIndex:
         self.bad_words = bad_words
         self.multiword = frozenset(w for w in bad_words if " " in w)
         self.has_multiword = bool(self.multiword)
+        # First words of every multi-word entry — lets the phrase scan
+        # reject an n-gram with one hash lookup instead of building it.
+        self.multiword_starts = frozenset(w.split(" ", 1)[0] for w in self.multiword)
         self.single_lengths = sorted({len(w) for w in bad_words if " " not in w})
 
         # SymSpell-style delete-1 neighborhood: each bad word (len >= 5) is
@@ -279,6 +356,7 @@ class Classifier:
         bad_words = profile.bad_words
         min_len = profile.min_word_length
         context_rules = profile.context_rules
+        benign_objects = profile.benign_objects
         raw_text = tokens.raw_normalized
         index = self._get_index(bad_words)
 
@@ -323,28 +401,74 @@ class Classifier:
 
         # ── Signal 2: Phrase match — bigrams and trigrams vs bad word set ──────
         # This catches multi-word toxic phrases not caught by single-word matching.
-        if not matched_terms:
-            multiword = index.multiword
-            all_ngrams = tokens.bigrams + tokens.trigrams
-            for ngram in all_ngrams:
-                # Check the raw n-gram and its space-stripped form
-                ngram_joined = ngram.replace(" ", "")
-                if ngram in multiword or ngram_joined in bad_words:
-                    matched_bad = ngram if ngram in multiword else ngram_joined
-                    if not _is_context_clean(ngram, matched_bad, context_rules, raw_text):
-                        matched_terms.append(ngram)
+        #
+        # This signal is NOT gated on "nothing matched yet", unlike the concat
+        # and fuzzy fallbacks below. Multi-word entries are where the highest
+        # harm lives — "kill yourself", "gonna kill", "kill you" — and a cheap
+        # single-word hit must never hide them: "you are such an idiot, go kill
+        # yourself" has to score as a threat, not as an insult with a side of
+        # profanity. Gating this signal was a performance shortcut that traded
+        # away the detection that matters most.
+        #
+        # Cost is bounded: one hash lookup per n-gram in the common case, with
+        # the join/stem work done only when the profile can actually match it.
+        multiword = index.multiword
+        has_multiword = index.has_multiword
+        lengths = index.single_lengths
+        starts = index.multiword_starts
+        for ngram in tokens.bigrams + tokens.trigrams:
+            # Cheapest possible gate: a multi-word entry can only match if
+            # the n-gram starts with a word that starts some entry. Most
+            # n-grams die here, which is what keeps this signal affordable
+            # now that it runs on every message.
+            space = ngram.find(" ")
+            head = ngram if space < 0 else ngram[:space]
+            can_phrase = head in starts or (has_multiword and stem(head) in starts)
+
+            matched_bad = None
+            if can_phrase and ngram in multiword:
+                matched_bad = ngram
+            else:
+                # Space-stripped form: catches a vocabulary word split across
+                # two tokens ("fuc king"). Length-filtered first — a joined
+                # n-gram can only match a vocabulary word of exactly its
+                # length, which rejects nearly all candidates before we pay
+                # for the string allocation.
+                joined_len = len(ngram) - ngram.count(" ")
+                if joined_len in lengths:
+                    ngram_joined = ngram.replace(" ", "")
+                    if ngram_joined in bad_words:
+                        matched_bad = ngram_joined
+            if matched_bad is not None:
+                if not _is_context_clean(ngram, matched_bad, context_rules, raw_text):
+                    benign = benign_objects.get(matched_bad)
+                    if benign and _benign_object_follows(raw_text, matched_bad, benign):
+                        # Ordinary technical/idiomatic usage — keep scanning,
+                        # a later n-gram may still be a real phrase.
+                        continue
+                    matched_terms.append(ngram)
+                    signals["phrase_match"] += 1
+                    break
+            # A stemmed n-gram still contains a space, so it can only match
+            # multi-word vocabulary entries — skip when the profile has none.
+            # The join is only worth doing when stemming actually changes a
+            # word; otherwise the stemmed form equals what we already tested.
+            if can_phrase and has_multiword:
+                parts = ngram.split()
+                stemmed_parts = [stem(w) for w in parts]
+                if stemmed_parts == parts:
+                    continue
+                stemmed_ngram = " ".join(stemmed_parts)
+                if stemmed_ngram in multiword:
+                    if not _is_context_clean(ngram, stemmed_ngram, context_rules, raw_text):
+                        benign = benign_objects.get(stemmed_ngram)
+                        if benign and _benign_object_follows(
+                            raw_text, stemmed_ngram, benign
+                        ):
+                            continue
+                        matched_terms.append(stemmed_ngram)
                         signals["phrase_match"] += 1
                         break
-                # Stemmed n-gram contains a space, so it can only match
-                # multi-word vocabulary entries — skip entirely when the
-                # profile has none.
-                if index.has_multiword:
-                    stemmed_ngram = " ".join(stem(w) for w in ngram.split())
-                    if stemmed_ngram in multiword:
-                        if not _is_context_clean(ngram, stemmed_ngram, context_rules, raw_text):
-                            matched_terms.append(stemmed_ngram)
-                            signals["phrase_match"] += 1
-                            break
 
         # ── Signal 3: Concatenated-word detection ("f u c k" → "fuck") ─────────
         # Uses all_words (unfiltered) so single-char split words are included.

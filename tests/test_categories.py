@@ -126,6 +126,51 @@ class TestBengaliCategories:
         assert "sexual" in result.categories
 
 
+class TestBengaliColloquialForms:
+    """
+    The forms Bengali speakers actually type.
+
+    "বোকাচোদা" is the most common piece of abuse in Bengali chat and used to
+    score completely clean: it is a compound that never contains the root
+    "চোদ" as a standalone token, and the colloquial "-া" verb ending is not
+    stemmed — stripping it would turn "বালা" (bangle) into a vulgar word.
+    """
+
+    @pytest.mark.parametrize("text", [
+        "বোকাচোদা", "বোকচোদ", "বকচোদ", "তুই একদম বোকাচোদা", "মাদারচোদা",
+    ])
+    def test_compound_slurs_detected(self, bn, text):
+        result = bn.analyze(text)
+        assert result.is_toxic, text
+        assert "slur" in result.categories, text
+
+    @pytest.mark.parametrize("text", ["চোদা", "চুদা", "চোদি", "চোদবি"])
+    def test_conjugated_sexual_forms_detected(self, bn, text):
+        result = bn.analyze(text)
+        assert result.is_toxic, text
+        assert "sexual" in result.categories, text
+
+    def test_sala_is_an_insult_not_a_slur(self, bn):
+        # শালা/সালা literally means brother-in-law and is everyday idiom, so
+        # it masks rather than blocks — the same call made for Hindi साला.
+        result = bn.analyze("তুই সালা")
+        assert result.is_toxic
+        assert "insult" in result.categories
+        assert result.severity is not Severity.CRITICAL
+
+    def test_colloquial_spelling_matches_standard_spelling(self, bn):
+        assert bn.analyze("সালা").is_toxic == bn.analyze("শালা").is_toxic
+
+    @pytest.mark.parametrize("text", [
+        "আমি ভাত খাই",
+        "তুমি কেমন আছো",
+        "আমার বোন স্কুলে যায়",
+        "আমার মায়ের হাতের রান্না খুব ভালো",
+    ])
+    def test_ordinary_bengali_stays_clean(self, bn, text):
+        assert not bn.analyze(text).is_toxic, text
+
+
 class TestSeverityCalibration:
     """
     Severity must reflect harm, not how many words matched. Confidence counts

@@ -39,6 +39,18 @@ class LanguageProfile:
     # "threat", "sexual". Slur/threat matches escalate severity by one
     # level and can drive per-category moderation policy thresholds.
     word_categories: dict[str, str] = field(default_factory=dict)
+    # Optional: matched phrase → set of benign *object* words.
+    #
+    # Threat phrases are only threats when the target is a person. "I will
+    # kill you" is a threat; "I will kill the process" is a sysadmin. This
+    # map says which objects make a matched phrase ordinary speech: when
+    # every occurrence of the phrase is directly followed by one of these
+    # words (ignoring articles and determiners), the match is suppressed.
+    #
+    # Deliberately narrow and explicit — it is an allowlist of inanimate
+    # objects, not a guess about intent. Anything not listed still flags,
+    # which keeps the failure mode on the side of detection.
+    benign_objects: dict[str, set[str]] = field(default_factory=dict)
     # Optional metadata
     version: str = "1.0.0"
     description: str = ""

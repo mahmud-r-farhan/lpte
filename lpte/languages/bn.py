@@ -71,9 +71,14 @@ _BENGALI_BAD_WORDS: set[str] = {
     "বদমাশ", "নষ্ট", "ছিনাল", "লুচ্চা", "লম্পট",
     "নোংরা", "ছাগল", "গরু", "পাঁঠা",
     "শালা", "শালি", "হারামজাদা", "জারজ",
+    "সালা", "সালি",  # colloquial স spellings — how "শালা" is actually typed
 
     # ── Sexual / vulgar ────────────────────────────────────────────────────────
     "চুদ", "চোদ", "চুদি", "চোদন", "চুদাচুদি",
+    # Conjugated forms that people actually type. The stemmer cannot derive
+    # these: stripping the trailing "-া" would also turn "বালা" (bangle) into
+    # "বাল", so the forms are enumerated explicitly instead.
+    "চোদা", "চুদা", "চোদি", "চোদে", "চোদবি", "চুদবি", "চোদানি",
     "বাল", "বালদের", "বালের",
     "ধোন", "গুদ", "পোদ", "মুতা",
 
@@ -82,6 +87,12 @@ _BENGALI_BAD_WORDS: set[str] = {
 
     # ── Severe compound (kept intact — these are unambiguous slurs) ───────────
     "মাদারচোদ", "মাচোদ", "ভাগিনাচোদ", "মায়েরচোদ", "বোনচোদ",
+    # "বোকাচোদা" is the single most common piece of abuse in Bengali chat and
+    # was missing entirely: it is a compound, and the root "চোদ" never appears
+    # in it as a standalone token. Spelling varies wildly in Latin-free chat,
+    # so the common variants are all listed.
+    "বোকাচোদা", "বোকাচোদ", "বোকচোদ", "বকচোদ", "বোকাচুদা", "বোকাচুদি",
+    "মাদারচোদা", "মায়েরচোদা", "বোনচোদা", "রান্ড",
 
     # ── Threats ───────────────────────────────────────────────────────────────
     "মেরে", "খুন", "হত্যা",
@@ -106,7 +117,17 @@ _BENGALI_WORD_CATEGORIES: dict[str, str] = {
     **{w: "sexual" for w in (
         "চুদ", "চোদ", "চুদি", "চোদন", "চুদাচুদি", "বাল", "বালদের",
         "বালের", "ধোন", "গুদ", "পোদ", "মুতা", "ভোদ", "পোঁদ",
+        # conjugated forms
+        "চোদা", "চুদা", "চোদি", "চোদে", "চোদবি", "চুদবি", "চোদানি",
     )},
+    **{w: "slur" for w in (
+        "বোকাচোদা", "বোকাচোদ", "বোকচোদ", "বকচোদ", "বোকাচুদা",
+        "বোকাচুদি", "মাদারচোদা", "মায়েরচোদা", "বোনচোদা", "রান্ড",
+    )},
+    # শালা/সালা literally means brother-in-law and is used as everyday
+    # exclamation, so it is an insult (mask), not a slur (block) — the same
+    # call made for Hindi साला.
+    **{w: "insult" for w in ("শালা", "সালা", "শালি", "সালি")},
 }
 
 BengaliProfile = LanguageProfile(
